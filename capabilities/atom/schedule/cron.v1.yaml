@@ -1,0 +1,60 @@
+asset_id: atom.schedule.cron.v1
+display_id: AT-005
+type: atom
+layer: L2
+subcategory: Schedule
+version: "1.0.0"
+schema_version: "1.0"
+name: "Cron 定时触发器"
+name_en: "Cron Schedule Trigger"
+description: |
+  cron 表达式定时触发工作流。在 n8n 端原生节点支持。
+  Dify 端不直接支持，需 n8n 触发后 webhook 进 Dify（混合模式）。
+tags: [trigger, cron, scheduler]
+recommend: 推荐
+adoption_cost: 低
+applicable_scenarios: [周期任务, 日报/周报, 定时数据同步]
+NOT_applicable:
+  - 事件触发（用 atom.trigger.webhook.v1）
+  - 手动触发（直接选 manual trigger）
+  - 间隔小于 1 分钟（cron 最小粒度限制）
+maintainer: "TBD / 2026-05"
+io_schema:
+  inputs:
+    type: object
+    required: [cron_expr]
+    properties:
+      cron_expr:
+        type: string
+        description: "5-field cron, e.g. '0 9 * * 1' = 每周一 9:00"
+      timezone: { type: string, default: "Asia/Shanghai" }
+  outputs:
+    type: object
+    properties:
+      output:
+        type: object
+        x-data-type: void_signal
+        description: "触发信号 + 当前时间戳"
+projections:
+  dify:
+    compatible_dify_version: ">=0.6.0"
+    node_type: null
+    not_supported: true
+    note: "Dify 无原生 cron。混合模式下由 n8n 触发后 webhook 进入 Dify。"
+  n8n:
+    compatible_n8n_version: ">=1.0"
+    node_type: n8n-nodes-base.scheduleTrigger
+    template: "# Phase 5"
+test_cases:
+  - name: "happy - parse weekly cron"
+    inputs:
+      cron_expr: "0 9 * * 1"
+    expected_output_match: { output: "any" }
+  - name: "edge - invalid cron"
+    inputs:
+      cron_expr: "not a cron"
+    expected_error_class: "ValueError"
+metrics: { cost_per_call_cny: 0 }
+provenance:
+  built_at: "2026-05-01T00:00:00Z"
+  built_by: manual

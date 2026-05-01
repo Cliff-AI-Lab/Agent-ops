@@ -1,0 +1,64 @@
+asset_id: atom.notify.dingtalk.v1
+display_id: AT-004
+type: atom
+layer: L2
+subcategory: Notify
+version: "1.0.0"
+schema_version: "1.0"
+name: "钉钉机器人推送"
+name_en: "DingTalk Bot Push"
+description: |
+  钉钉自定义机器人 webhook 推送。
+  支持文本 / markdown / actionCard 三种消息类型。
+  MVP 期推送内容主用 markdown 表格（不发图，避免 PNG 渲染依赖）。
+tags: [dingtalk, notification, webhook, im]
+recommend: 推荐
+adoption_cost: 低
+applicable_scenarios: [团队推送, 周报通知, 告警]
+NOT_applicable:
+  - 钉钉群图片消息（V2.1 加 chart 原子后启用）
+  - 钉钉私聊
+  - 飞书 / 企业微信（用各自专属原子）
+maintainer: "TBD / 2026-05"
+io_schema:
+  inputs:
+    type: object
+    required: [webhook_url, message_type, content]
+    properties:
+      webhook_url: { type: string }
+      message_type: { enum: [text, markdown, actionCard], default: markdown }
+      content: { type: string, x-data-type: markdown_text }
+      title: { type: string, default: "" }
+      at_mobiles: { type: array, default: [] }
+  outputs:
+    type: object
+    properties:
+      output: { type: object }
+      message_id: { type: string }
+projections:
+  dify:
+    compatible_dify_version: ">=0.6.0"
+    node_type: http
+    template: "# Phase 1 W3"
+  n8n:
+    compatible_n8n_version: ">=1.0"
+    node_type: n8n-nodes-base.httpRequest
+    template: "# Phase 5"
+test_cases:
+  - name: "happy - markdown push"
+    inputs:
+      webhook_url: "${TEST_DINGTALK_WEBHOOK}"
+      message_type: markdown
+      content: "# 测试\n| a | b |\n|---|---|\n| 1 | 2 |"
+      title: "test"
+    expected_output_match: { message_id: "any" }
+  - name: "edge - invalid webhook"
+    inputs:
+      webhook_url: "https://invalid.example.com/robot"
+      message_type: text
+      content: "x"
+    expected_error_class: "WebhookError"
+metrics: { cost_per_call_cny: 0 }
+provenance:
+  built_at: "2026-05-01T00:00:00Z"
+  built_by: manual

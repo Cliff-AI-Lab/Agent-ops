@@ -1,0 +1,80 @@
+asset_id: atom.llm.chat.v1
+display_id: AT-003
+type: atom
+layer: L2
+subcategory: LLM
+version: "1.0.0"
+schema_version: "1.0"
+name: "LLM 通用对话"
+name_en: "LLM Chat (Ruidong gateway)"
+description: |
+  通过睿动网关 (iruidong.com/v1) 发起 LLM 调用。
+  不绑定具体型号——运行时按 task_type+size 从 /v1/models 选取。
+  禁止硬编码模型名（核心规则）。
+tags: [llm, openai-compatible, ruidong]
+recommend: 推荐
+adoption_cost: 低
+applicable_scenarios: [全部 LLM 调用]
+NOT_applicable:
+  - 视觉理解（用 atom.llm.vision.v1）
+  - 实时流式语音（用 atom.asr.* 系列）
+  - Embedding（用 atom.embedding.* 系列）
+maintainer: "TBD / 2026-05"
+model_routing:
+  required: true
+  task_types_supported:
+    - 通用对话
+    - 轻量判别
+    - 结构化抽取
+    - 长文档分块总结
+    - 长上下文 / 深度推理
+    - Agent / Tool calling
+    - 代码生成 / 调试
+  default_fallback_chain:
+    "小": ["小", "中"]
+    "中": ["中", "大", "小"]
+    "大": ["大", "中"]
+io_schema:
+  inputs:
+    type: object
+    required: [prompt_id, llm_task_type, llm_size]
+    properties:
+      prompt_id: { type: string }
+      prompt_vars: { type: object, default: {} }
+      llm_task_type: { type: string }
+      llm_size: { enum: [小, 中, 大] }
+      response_format: { enum: [text, json_object], default: text }
+      max_tokens: { type: integer, default: 2000 }
+  outputs:
+    type: object
+    properties:
+      output: { type: [string, object], x-data-type: natural_language }
+      tokens_used: { type: integer }
+      model_actually_used: { type: string }
+      model_fallback: { type: boolean, default: false }
+projections:
+  dify:
+    compatible_dify_version: ">=0.6.0"
+    node_type: llm
+    template: "# Phase 1 W3 with ${RUIDONG_MODEL_FOR_*} placeholder"
+  n8n:
+    compatible_n8n_version: ">=1.0"
+    node_type: "@n8n/n8n-nodes-langchain.openAi"
+    template: "# Phase 5"
+test_cases:
+  - name: "happy - simple chat"
+    inputs:
+      prompt_id: "prompt.echo.v1"
+      llm_task_type: "通用对话"
+      llm_size: "中"
+    expected_output_match: { tokens_used: 0 }
+  - name: "edge - fallback triggered"
+    inputs:
+      prompt_id: "prompt.echo.v1"
+      llm_task_type: "通用对话"
+      llm_size: "大"
+    expected_output_match: { model_fallback: false }
+metrics: { cost_per_call_cny: null }
+provenance:
+  built_at: "2026-05-01T00:00:00Z"
+  built_by: manual

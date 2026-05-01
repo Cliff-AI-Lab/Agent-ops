@@ -1,0 +1,54 @@
+asset_id: atom.http.generic.v1
+display_id: AT-002
+type: atom
+layer: L2
+subcategory: HTTP
+version: "1.0.0"
+schema_version: "1.0"
+name: "通用 HTTP 调用"
+name_en: "Generic HTTP Request"
+description: |
+  发起 HTTP 请求并返回响应。支持 GET/POST/PUT/DELETE/PATCH。
+  JSON / form-data 自动序列化。Bearer/Basic/Custom Header 鉴权。
+tags: [http, rest, api, integration]
+recommend: 推荐
+adoption_cost: 低
+applicable_scenarios: [REST API 调用, webhook 触发, 通用集成]
+NOT_applicable: [流式 SSE 响应, WebSocket 长连接, 大文件下载>10MB]
+maintainer: "TBD / 2026-05"
+io_schema:
+  inputs:
+    type: object
+    required: [url, method]
+    properties:
+      url: { type: string }
+      method: { enum: [GET, POST, PUT, DELETE, PATCH] }
+      headers: { type: object, default: {} }
+      body: { type: [object, string, "null"], default: null }
+      timeout_seconds: { type: integer, default: 30 }
+  outputs:
+    type: object
+    properties:
+      output: { type: object, x-data-type: json_object }
+      status_code: { type: integer }
+projections:
+  dify:
+    compatible_dify_version: ">=0.6.0"
+    node_type: http
+    template: "# Phase 1 W3"
+  n8n:
+    compatible_n8n_version: ">=1.0"
+    node_type: n8n-nodes-base.httpRequest
+    template: "# Phase 5"
+test_cases:
+  - name: "happy - GET 200"
+    inputs: { url: "https://example.com", method: GET }
+    expected_output_match: { status_code: 200 }
+  - name: "edge - timeout"
+    inputs: { url: "https://10.255.255.1", method: GET, timeout_seconds: 1 }
+    expected_error_class: "TimeoutError"
+metrics: { cost_per_call_cny: 0 }
+provenance:
+  built_at: "2026-05-01T00:00:00Z"
+  built_by: manual
+  license: "MIT"

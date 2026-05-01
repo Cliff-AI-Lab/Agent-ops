@@ -1,0 +1,100 @@
+# AT-001 atom.db.postgres.v1
+# Phase 1 seed atom. Full schema per E:/Obsidian/Agent 工厂/工程规范/原子YAML规范.md
+
+asset_id: atom.db.postgres.v1
+display_id: AT-001
+type: atom
+layer: L2
+subcategory: DB
+version: "1.0.0"
+schema_version: "1.0"
+
+name: "PostgreSQL 查询"
+name_en: "PostgreSQL Query"
+description: |
+  执行 PostgreSQL SQL 查询并返回结构化结果。适合大多数关系型数据查询场景。
+  支持参数化查询防 SQL 注入。不支持流式大结果集（>1万行）和跨库 join。
+tags:
+  - database
+  - sql
+  - relational
+  - postgres
+
+recommend: 推荐
+adoption_cost: 低
+applicable_scenarios:
+  - 商业数据查询
+  - 报表后台
+  - 已有 Postgres 数据源的场景
+NOT_applicable:
+  - 流式大结果集（>1万行）
+  - 跨库 join
+  - 无 PG 数据源的场景
+price_summary: "免费（开源数据库）"
+case_projects: []
+maintainer: "TBD / 2026-05"
+notes_url: "https://www.postgresql.org/docs/"
+
+io_schema:
+  inputs:
+    type: object
+    required: [sql, connection]
+    properties:
+      sql:
+        type: string
+        description: "PostgreSQL SQL，支持 $1 $2 参数占位符"
+      connection:
+        type: string
+        description: "DSN 或环境变量引用，如 ${SALES_DB_DSN}"
+      params:
+        type: array
+        default: []
+      timeout_seconds:
+        type: integer
+        default: 30
+  outputs:
+    type: object
+    properties:
+      output:
+        type: array
+        x-data-type: tabular_data
+      row_count:
+        type: integer
+
+projections:
+  dify:
+    compatible_dify_version: ">=0.6.0"
+    node_type: code
+    requires_adapter: false
+    template: |
+      # Phase 1 W3: 完整 Dify code 节点模板
+  n8n:
+    compatible_n8n_version: ">=1.0"
+    node_type: n8n-nodes-base.postgres
+    template: |
+      # Phase 5: 完整 n8n 节点模板
+
+health_check:
+  fixture_path: "tests/fixtures/atom/db/postgres.v1.fixture.yaml"
+  schedule: "every_24h"
+  status: green
+  last_check_at: "2026-05-01T00:00:00Z"
+
+test_cases:
+  - name: "happy - simple SELECT"
+    inputs: { sql: "SELECT 1 as n", connection: "${TEST_DB}" }
+    expected_output_match: { output: [{n: 1}], row_count: 1 }
+  - name: "edge - empty result"
+    inputs: { sql: "SELECT * FROM nonexistent_table", connection: "${TEST_DB}" }
+    expected_output_match: { output: [], row_count: 0 }
+
+metrics:
+  pass_rate: null
+  p95_latency_ms: null
+  cost_per_call_cny: 0
+
+provenance:
+  built_at: "2026-05-01T00:00:00Z"
+  built_by: manual
+  source_url: null
+  license: "PostgreSQL License"
