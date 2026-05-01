@@ -71,10 +71,12 @@ async def rank_candidates(
 
     if len(candidates) == 1:
         atom, score = candidates[0]
+        # 单候选：subcategory 已硬过滤，唯一项即"必选"，给高基础线 0.75
+        # recall 分高时进一步提升，最高 0.95
         sel = _Selection(
             atom=atom,
-            confidence=min(0.95, max(0.5, score + 0.4)),
-            reason=f"唯一候选；recall 分 {score:.2f}",
+            confidence=min(0.95, max(0.75, score + 0.6)),
+            reason=f"唯一候选（subcategory 过滤后）；recall 分 {score:.2f}",
         )
         if atom.subcategory == "LLM":
             sel.llm_task_type, sel.llm_size = _heuristic_llm_routing(step.verb)
