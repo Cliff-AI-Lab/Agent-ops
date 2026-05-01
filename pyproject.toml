@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "0.5.0"
-description = "Agent Ops — deterministic runtime coordinating heterogeneous agents, tools, humans through typed capability contracts."
+version = "2.0.0"
+description = "Agent Ops V2.0.0 — Lights-out agent factory: NL → canvas growth → DSL → deploy. Built on the deterministic runtime of v0.5.0."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

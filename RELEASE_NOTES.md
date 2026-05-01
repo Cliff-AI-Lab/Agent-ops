@@ -1,5 +1,54 @@
 # Agent Ops — Release Notes
 
+## V2.0.0 — 2026-05-01 · 工厂基线（设计稿，未打包）
+
+> **重大版本跳跃**：v0.5.0 → V2.0.0 标志架构性变更——从"运行时协调器"升级为"智能体黑灯工厂"。
+> 后续打包从 V2.0.1 开始（Phase 1 完成时）。
+
+### 核心变更
+
+- **新增**：NL → 画布生长 → DSL → 部署 完整工厂流水线
+- **新增**：5 层资产中心（L1 基石 / L2 原子 / L3 中间组合 / L4 场景智能体 / L5 Harness）+ 横切 LLM 模型路由表 + 行业分类
+- **新增**：6 工位 + 6 Gate 协同建造（设计/加工/组装/测试/UI/部署）
+- **保留**：v0.5.0 的 239 个测试 + 三层金字塔注册中心 + 6 层 trace 总线 + 自我强化循环
+- **集成**：与 Agent World 的 `/creator/factory` 板块对接，Almanac 风格 UI
+
+### 8 条核心强制规则
+
+1. 禁用 emoji（icon 用 lucide-react / Mermaid）
+2. Almanac 美学（衬线 + 焦橙 + 纸面，禁渐变/玻璃态）
+3. iruidong 网关（不硬编码型号，运行时查 /v1/models）
+4. 大节点 Gate 干预（阶段内 read-only，6 Gate 末端开放编辑）
+5. 画布美观简洁可动态（节点 4 项信息上限）
+6. R1 组件化开发（每功能独立目录 + interface.py + impl.py + tests + Owner README）
+7. R2 架构图先行（C1 容器 + C2 组件 + C3 数据流 Mermaid，Almanac 配色）
+8. R3 代码 Nexus（GitNexus 索引 + MCP 喂 AI agent）
+
+### V1 GA 路线图（13 周）
+
+- Phase 1 (W1-3)：仓库扩 5 层 + IntentParser + Resolver + Dify Compiler → V2.0.1
+- Phase 2 (W4-5)：6 Gate 状态机 + canvas 事件流 + harvest CLI → V2.0.2
+- Phase 3 (W6-8)：自研画布 + Gate 评审 UI → V2.0.3
+- Phase 4 (W9-10)：MVP 评测 70% → V2.0.4
+- Phase 5 (W11-13)：n8n + 多模式 + 80% GA → **V2.0.5 = V1 GA**
+
+### 关键决策（详见 Obsidian 工作台）
+
+- **MVP 场景**：智能日报/周报生成（数据分析智能体类）
+- **5 个种子原子**：DB/HTTP/LLM/Notify/Schedule（v2 审计后调整，去 Chart 加 cron）
+- **Dify + n8n 双底座**（Dify 为 AI 大脑，n8n 为手脚和触发）
+- **80% GA 验收**（MVP 期 70%，留迭代空间）
+- **Almanac UI 风格**（与 Agent World v1.8 对齐）
+
+### 链接
+
+- 主基线：`E:\Obsidian\Agent 工厂\Agent-工厂-v1-基线设计.md`
+- 决策记录：`E:\Obsidian\Agent 工厂\决策记录.md`
+- 可行性审计：`E:\Obsidian\Agent 工厂\可行性审计-v2.md`
+- 工程规范：`E:\Obsidian\Agent 工厂\工程规范\` (含 IR 契约 / 原子 YAML / 画布 / 组件化与架构 / 代码 Nexus)
+
+---
+
 ## v0.5.0 — 2026-04-26 (`ops` CLI)
 
 ### Batch H — `ops` CLI MVP (blueprint M9)
