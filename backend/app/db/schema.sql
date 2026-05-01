@@ -52,3 +52,46 @@ CREATE TABLE generated_assets (
 );
 CREATE INDEX IF NOT EXISTS idx_assets_status ON generated_assets(status);
 CREATE INDEX IF NOT EXISTS idx_assets_session ON generated_assets(source_session_id);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Phase 2 (V2.0.0 → V2.0.2): Factory Session state machine
+-- ─────────────────────────────────────────────────────────────────────────
+
+DROP TABLE IF EXISTS factory_sessions;
+CREATE TABLE factory_sessions (
+  session_id TEXT PRIMARY KEY,
+  nl TEXT NOT NULL,
+  state TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  final_run_id TEXT,
+  final_artifact_path TEXT,
+  industry_code TEXT,
+  scenario TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_factory_sessions_state ON factory_sessions(state);
+
+DROP TABLE IF EXISTS factory_artifacts;
+CREATE TABLE factory_artifacts (
+  artifact_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES factory_sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_factory_artifacts_session ON factory_artifacts(session_id, stage);
+
+DROP TABLE IF EXISTS factory_gate_decisions;
+CREATE TABLE factory_gate_decisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  gate_id TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  payload_json TEXT,
+  decided_by TEXT,
+  decided_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES factory_sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_factory_decisions_session ON factory_gate_decisions(session_id);
