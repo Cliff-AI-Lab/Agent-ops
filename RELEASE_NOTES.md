@@ -1,5 +1,31 @@
 # Agent Ops — Release Notes
 
+## V2.0.2 — 2026-05-01 · Phase 2 收尾包（6 Gate 状态机 + HTTP API + SSE）
+
+> 状态：Phase 2 W4+W5 完成。**343 测试通过 + 1 skipped**。
+
+### 新功能
+
+- **FactorySession 6 Gate 状态机**（15 状态：CREATED + 6 工位 + 6 Gate + 3 终态）
+  - 纯转移函数 `next_state_after()`，全部转移路径单测覆盖
+  - GateDecision: pass / edit / redo（v2 审计补法 #3）
+- **DB 持久化**（3 张新表，additive 不破坏 v0.5.0）
+  - factory_sessions / factory_artifacts / factory_gate_decisions
+- **HTTP API `/api/factory/*`**（6 路由）
+  - POST /start、GET /{sid}、GET /{sid}/events (SSE)、POST /{sid}/gate、POST /{sid}/cancel、GET /{sid}/artifact
+  - SSE 按 session_id 过滤，World 前端可直接订阅
+  - BackgroundTasks 自动驱动各工位完成后进入 Gate
+- **Trace Bus 扩展**：11 个 `factory.*` 事件类型常量
+- **协同建造闭环**：start → design → GATE_DESIGN → pass → wrap → ... → RELEASED → 写 agents/__generated__/{sid}/workflow.yaml
+
+### 已知局限
+
+- DifyCompiler 仍输出 "Dify-shaped" YAML（Phase 1 W3 待沙箱验证）
+- harvest CLI 未实现（V2.0.3 补）
+- Phase 3 World 前端未启动
+
+---
+
 ## V2.0.1 — 2026-05-01 · Phase 1 W2 收尾包（首个工厂可执行版本）
 
 > 状态：可打包发布；ES-001 评测集 10/10 真 LLM 通过。

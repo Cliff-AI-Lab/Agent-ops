@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.1"
-description = "Agent Ops V2.0.1 — Phase 1 W2 release: 7 real components + factory CLI + ES-001 eval @ 100% pass rate."
+version = "2.0.2"
+description = "Agent Ops V2.0.2 — Phase 2: 6 Gate state machine + HTTP /api/factory/* + SSE canvas events + DB persistence."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
