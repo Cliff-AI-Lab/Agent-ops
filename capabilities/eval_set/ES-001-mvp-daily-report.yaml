@@ -1,0 +1,108 @@
+# ES-001: MVP 智能日报/周报场景评测集
+# Phase 4 验收基线：MVP ≥70% / GA ≥80%
+# 用例覆盖：单源/多源/异常输入/不同触发器
+# 检查方式：loose 结构性断言（target/subcategories/node-count/validator-ok）
+
+asset_id: ES-001
+version: "1.0.0"
+description: |
+  MVP 智能日报/周报场景的 10 个评测用例。覆盖 cron 触发、单数据源、Notify
+  渠道差异、异常 NL 鲁棒性。以 LLM 输出会有变动，故仅做结构性断言。
+maintainer: "TBD / 2026-05"
+
+cases:
+  # ------ 单数据源 + 简单分析 ------
+  - case_id: c01-cron-db-llm-dingtalk
+    description: 标准 MVP 场景：cron + DB + LLM + 钉钉
+    nl: 每周一上午 9 点查询销售数据库，写中文周报推到钉钉运营群
+    expected:
+      target: hybrid
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, cron, single-source]
+
+  - case_id: c02-daily-order-summary
+    description: 每日订单汇总到邮件（n8n 主，可能不含 LLM）
+    nl: 每天上午 8 点把昨日订单量从订单库取出，发邮件给运营
+    expected:
+      subcategories: [DB]
+      min_nodes: 2
+      require_validator_ok: true
+    tags: [mvp, daily, db]
+
+  - case_id: c03-http-source-report
+    description: 数据源是外部 HTTP API
+    nl: 每周拉取我们 CRM API 上周新增客户列表，分析签约金额 Top10，发钉钉
+    expected:
+      subcategories: [HTTP, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, http-source]
+
+  # ------ 不同触发器 ------
+  - case_id: c04-webhook-trigger
+    description: webhook 触发的实时分析
+    nl: 当客服系统 webhook 推过来一条投诉，调 LLM 分析严重程度并分级推钉钉
+    expected:
+      subcategories: [LLM, Notify]
+      min_nodes: 2
+      require_validator_ok: true
+    tags: [mvp, webhook]
+
+  - case_id: c05-monthly-report
+    description: 月度报表
+    nl: 每月最后一天 18 点，从销售库取本月数据，生成月报推钉钉
+    expected:
+      target: hybrid
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, monthly]
+
+  # ------ 不同 Notify 渠道 ------
+  - case_id: c06-multi-notify-channel
+    description: 同时推钉钉 + 飞书
+    nl: 每周一查询销售数据，生成周报，同时发钉钉和飞书运营群
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, multi-notify]
+
+  # ------ 异常输入鲁棒性 ------
+  - case_id: c07-vague-input
+    description: 含糊需求（缺时间表达、缺数据源）—— 期望工厂诚实报告 no_candidate 而非崩溃
+    nl: 帮我做一个销售报表
+    expected:
+      min_nodes: 1
+      require_validator_ok: true
+      allowed_issue_kinds: [type_adapters_needed, no_candidate]
+    tags: [mvp, edge, vague]
+
+  - case_id: c08-non-mvp-domain
+    description: 非 MVP 场景（语音）—— 应该报告缺原子但不应崩溃
+    nl: 把这段录音转成文字然后总结
+    expected:
+      min_nodes: 1
+      allowed_issue_kinds: [type_adapters_needed, no_candidate]
+    tags: [mvp, edge, gap]
+
+  # ------ 业务变体 ------
+  - case_id: c09-trend-analysis
+    description: 趋势分析（多 LLM 步骤）
+    nl: 每周一从销售库取上周数据，用 LLM 找出客户购买趋势异常，写洞察报告发钉钉
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, analysis]
+
+  - case_id: c10-event-driven
+    description: 事件驱动（订单异常时触发）
+    nl: 当订单库出现金额超过 100 万的异常订单，立即用 LLM 评估风险并推钉钉
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, event]

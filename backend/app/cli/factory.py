@@ -109,6 +109,61 @@ def _machine_print(result: dict[str, Any]) -> None:
     )
 
 
+async def _run_eval(eval_set_id: str | None, only_case: str | None) -> Any:
+    from app.core.pipelines.factory.pipeline import FactoryPipeline
+    from app.registry.eval_runner import EvalRunnerImpl, load_eval_sets
+
+    atoms_dir = _atoms_dir()
+    eval_dir = atoms_dir.parent / "eval_set"
+    if not eval_dir.exists():
+        raise FileNotFoundError(f"eval_set dir missing: {eval_dir}")
+
+    sets = load_eval_sets(eval_dir)
+    if eval_set_id:
+        if eval_set_id not in sets:
+            raise KeyError(
+                f"eval_set {eval_set_id} not found; available: {list(sets)}"
+            )
+        es = sets[eval_set_id]
+    else:
+        es = next(iter(sets.values()))
+
+    if only_case:
+        es = es.model_copy(
+            update={"cases": [c for c in es.cases if c.case_id == only_case]}
+        )
+        if not es.cases:
+            raise KeyError(f"case {only_case} not found in {es.asset_id}")
+
+    pipeline = FactoryPipeline(atoms_dir=atoms_dir)
+    runner = EvalRunnerImpl(pipeline=pipeline)
+    return await runner.run(es)
+
+
+def _human_eval_print(report: Any) -> None:
+    print(f"eval_set:  {report.eval_set_id}")
+    print(f"total:     {report.total}")
+    print(f"passed:    {report.passed}")
+    print(f"failed:    {report.failed}")
+    print(f"pass_rate: {report.pass_rate:.1%}")
+    mvp = "OK" if report.is_mvp_threshold_met else "FAIL"
+    ga = "OK" if report.is_ga_threshold_met else "FAIL"
+    print(f"MVP gate (>= 70%): {mvp}")
+    print(f"GA gate  (>= 80%): {ga}")
+    print()
+    for r in report.case_results:
+        marker = "[PASS]" if r.passed else "[FAIL]"
+        print(
+            f"  {marker} {r.case_id:32s} target={r.actual_target or '-':6s} "
+            f"nodes={r.actual_node_count} edges={r.actual_edge_count} "
+            f"subs={','.join(r.actual_subcategories) or '-'} "
+            f"({r.elapsed_ms} ms)"
+        )
+        if not r.passed:
+            for reason in r.reasons:
+                print(f"    -> {reason}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="factory", description="Agent Ops V2.0.0 factory")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -118,33 +173,57 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("--output", "-o", default=None, help="写 DSL 到文件")
     p_build.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_eval = sub.add_parser("eval", help="跑评测集")
+    p_eval.add_argument("--set", "-s", default=None, help="eval_set_id; 默认第一个")
+    p_eval.add_argument("--only", default=None, help="只跑某一 case_id")
+    p_eval.add_argument("--json", action="store_true", help="机器可读输出")
+
     args = parser.parse_args(argv)
 
-    if args.cmd != "build":
-        parser.error(f"unknown command: {args.cmd}")
-        return 2
+    if args.cmd == "build":
+        try:
+            result = asyncio.run(_run_build(args.nl))
+        except FileNotFoundError as exc:
+            print(f"[factory] config error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] build failed: {exc}", file=sys.stderr)
+            return 4
 
-    try:
-        result = asyncio.run(_run_build(args.nl))
-    except FileNotFoundError as exc:
-        print(f"[factory] config error: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:  # noqa: BLE001
-        print(f"[factory] build failed: {exc}", file=sys.stderr)
-        return 4
+        if args.output:
+            Path(args.output).write_text(result["dsl"], encoding="utf-8")
+            print(f"[factory] wrote DSL -> {args.output}", file=sys.stderr)
 
-    if args.output:
-        Path(args.output).write_text(result["dsl"], encoding="utf-8")
-        print(f"[factory] wrote DSL -> {args.output}", file=sys.stderr)
+        if args.json:
+            _machine_print(result)
+        else:
+            _human_print(result)
 
-    if args.json:
-        _machine_print(result)
-    else:
-        _human_print(result)
+        if not result["validation"]["ok"]:
+            return 3
+        return 0
 
-    if not result["validation"]["ok"]:
-        return 3
-    return 0
+    if args.cmd == "eval":
+        try:
+            report = asyncio.run(_run_eval(args.set, args.only))
+        except (FileNotFoundError, KeyError) as exc:
+            print(f"[factory] config error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] eval failed: {exc}", file=sys.stderr)
+            return 4
+
+        if args.json:
+            print(report.model_dump_json(indent=2))
+        else:
+            _human_eval_print(report)
+
+        if not report.is_mvp_threshold_met:
+            return 3
+        return 0
+
+    parser.error(f"unknown command: {args.cmd}")
+    return 2
 
 
 if __name__ == "__main__":

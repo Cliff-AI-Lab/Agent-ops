@@ -64,6 +64,9 @@ def build_edges(
     """Walk step.inputs `$sX.output` references and emit ResolvedEdge with type_check."""
     edges: list[ResolvedEdge] = []
     for step in intent.steps:
+        # Skip steps that weren't resolved (e.g. no_candidate).
+        if step.id not in nodes_by_id:
+            continue
         for var_name, ref in step.inputs.items():
             if not isinstance(ref, str):
                 continue
