@@ -38,6 +38,8 @@ ops-api = "app.main:run"
 ops-initdb = "app.db.init_db:main"
 # Batch H — `ops` CLI for headless control of a running backend
 ops = "app.cli.ops:main"
+# V2.0.0 factory CLI — local pipeline runner
+factory = "app.cli.factory:main"
 
 [tool.setuptools.package-dir]
 "" = "backend"
