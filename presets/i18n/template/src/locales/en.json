@@ -1,0 +1,12 @@
+{
+  "common.save": "Save",
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "common.loading": "Loading…",
+  "common.empty": "No data",
+  "common.retry": "Retry",
+  "common.back": "Back",
+  "common.next": "Next",
+  "common.search": "Search",
+  "common.settings": "Settings"
+}

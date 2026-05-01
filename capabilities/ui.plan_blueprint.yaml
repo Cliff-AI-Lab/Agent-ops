@@ -1,0 +1,28 @@
+# Agent Ops CapabilityContract — blueprint §8.1
+# Generated from BlueprintPlanner at ontology/objects schema v0.2.
+# Owner: raytone-ui · Risk: low · Activation: active
+capability_id: ui.plan_blueprint
+version: 0.1.0
+name: Plan UIBlueprint from RequirementSpec
+description: |
+  Translates a structured RequirementSpec (product_name, target_users, core_pages,
+  special_requirements) into a UIBlueprint (page list with components + brand tokens).
+  Uses L3 BlueprintPlanner driving an LLM through L4 Repair.
+owner: raytone-ui
+input_schema_ref: ontology:RequirementSpec
+output_schema_ref: ontology:UIBlueprint
+allowed_tools: []
+forbidden_actions:
+  - file_write
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.05
+latency_budget_ms: 60000
+quality_checks:
+  - schema-valid
+  - page-count-matches-spec
+fallback_capabilities: []
+eval_suite_ids:
+  - ui-plan-golden
+activation_status: active

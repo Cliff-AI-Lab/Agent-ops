@@ -1,0 +1,45 @@
+tool_id: analysis.report.docanalyze
+version: 0.1.0
+name: 文档报告分析(内部工具)
+description: |
+  上传 PDF/Word/Excel 文档,自动提取结构(标题、段落、表格、图表)并生成
+  摘要、风险点、关键数字。适合尽调、招投标审阅、财报快速分析等场景。
+provider: Internal
+category: report_analysis
+tags: [pdf, docx, xlsx, table-extract, summary]
+input_schema:
+  type: object
+  required: [document_uri]
+  properties:
+    document_uri: { type: string, description: "S3 或对象存储 URI" }
+    focus_areas:
+      type: array
+      items: { type: string }
+      description: "可选关注点,如 ['财务风险','合同条款','数据合规']"
+    summary_length: { type: string, enum: [short, medium, long], default: medium }
+output_schema:
+  type: object
+  properties:
+    structure:
+      type: object
+      properties:
+        sections: { type: array }
+        tables: { type: array }
+        charts: { type: array }
+    summary: { type: string }
+    key_numbers: { type: array, items: { type: object } }
+    risks: { type: array, items: { type: string } }
+transport_type: http
+endpoint: http://internal-analysis/api/v1/report/analyze
+auth_mode: bearer
+auth_env_vars: [INTERNAL_ANALYSIS_TOKEN]
+pricing_model: per_call
+cost_per_call: 0.02
+rate_limit_per_minute: 20
+expected_latency_ms: 8000
+docs_url: null
+examples:
+  - title: 分析一份招股书 PDF 财务风险
+    input: { document_uri: "s3://raw/ipo-draft.pdf", focus_areas: ["财务风险","关联交易"], summary_length: "medium" }
+    output_hint: risks 字段列出识别的风险点,summary 是摘要
+activation_status: active

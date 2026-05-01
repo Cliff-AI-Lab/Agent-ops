@@ -1,0 +1,63 @@
+agent_id: agents.web_research
+version: 0.1.0
+name: Web 研究助手
+description: |
+  互联网研究 Agent。给定一个研究主题或问题,先用 web_search 找到相关网页 URL,
+  再用 web_scrape 拉取核心内容,最后用 LLM 综合输出结构化研究纪要(包含证据链接 +
+  关键发现 + 反对观点)。
+
+  典型场景:竞品分析、技术选型调研、新闻事件梳理。
+owner: agent-ops-platform
+
+capabilities_used: []
+tools_used:
+  - web.search.tavily
+  - web.scrape.firecrawl
+entry_capability: null
+
+intent_keywords:
+  - 网络调研
+  - 互联网研究
+  - 竞品分析
+  - 写一份调研报告
+  - 搜集资料
+  - web research
+  - desk research
+  - market research
+  - news roundup
+tags: [research, web, multi-source]
+
+examples:
+  - title: 调研 Dify vs Coze
+    user_intent: 帮我对比一下 Dify 和 Coze 在企业 RAG 场景的优劣势
+    expected_outcome: 一份带 8-12 条证据来源链接的对比纪要,含价格/部署/集成三个维度
+  - title: 写新一轮 AI Agent 框架综述
+    user_intent: 把 2026 年主流 AI Agent 框架综述出来
+    expected_outcome: 含主流框架名 + 各自定位 + 关键差异 + 选型建议
+
+input_schema:
+  type: object
+  required: [topic]
+  properties:
+    topic: { type: string, description: 调研主题 }
+    depth: { type: string, enum: [shallow, normal, deep], default: normal }
+    language: { type: string, default: zh }
+output_schema:
+  type: object
+  properties:
+    summary: { type: string }
+    findings: { type: array, items: { type: string } }
+    sources: { type: array, items: { type: object, properties: { url: { type: string }, title: { type: string } } } }
+
+transport_type: local
+risk_level: low
+cost_budget: 0.30
+latency_budget_ms: 60000
+runtime_config:
+  search_top_k: 5
+  scrape_max_chars: 8000
+  summarizer_model_pref: heavy
+
+eval_suite_ids: []
+is_generated: false
+activation_status: active

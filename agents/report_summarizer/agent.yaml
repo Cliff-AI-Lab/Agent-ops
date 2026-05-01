@@ -1,0 +1,73 @@
+agent_id: agents.report_summarizer
+version: 0.1.0
+name: 报告摘要助手
+description: |
+  文档摘要 Agent。给定 PDF / 扫描件 / 长文本报告,先用 baidu.ocr 提取可识别文字,
+  再用 analysis.report.docanalyze 做结构化分析(章节/要点/关键数据),最后用 LLM
+  输出**可读摘要 + 3 条关键洞察 + 待进一步验证的问题**。
+
+  典型场景:季度报告 / 合同条款 / 技术白皮书 / 尽调材料。
+owner: agent-ops-platform
+
+capabilities_used: []
+tools_used:
+  - baidu.ocr.general_accurate
+  - analysis.report.docanalyze
+entry_capability: null
+
+intent_keywords:
+  - 报告摘要
+  - 文档总结
+  - PDF 提炼
+  - 合同分析
+  - 尽调摘要
+  - report summary
+  - document analysis
+  - pdf summarization
+  - extract key points
+tags: [summarize, ocr, document, analysis]
+
+examples:
+  - title: 季报提炼三要点
+    user_intent: 帮我看这份 30 页的 Q3 财报,提炼三条关键信息
+    expected_outcome: 3 条要点 + 原文引用位置 + 1 个建议进一步核查的问题
+  - title: 合同风险点扫描
+    user_intent: 扫描这份供应商合同,标出所有条款风险
+    expected_outcome: 分类列出条款(付款 / 违约 / 终止),每条带原文行号
+
+input_schema:
+  type: object
+  required: [document]
+  properties:
+    document:
+      oneOf:
+        - { type: string, description: "文本内容" }
+        - { type: string, format: uri, description: "文档 URL / 路径" }
+    focus:
+      type: string
+      description: "摘要聚焦维度(可选)"
+      enum: [general, financial, legal, technical]
+      default: general
+    max_points:
+      type: integer
+      default: 5
+output_schema:
+  type: object
+  properties:
+    summary: { type: string }
+    key_points: { type: array, items: { type: string } }
+    open_questions: { type: array, items: { type: string } }
+    evidence_locations: { type: array, items: { type: object } }
+
+transport_type: local
+risk_level: low
+cost_budget: 0.25
+latency_budget_ms: 90000
+runtime_config:
+  ocr_language_hint: zh-CN
+  analysis_model_pref: heavy
+  max_tokens: 4000
+
+eval_suite_ids: []
+is_generated: false
+activation_status: active

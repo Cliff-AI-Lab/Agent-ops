@@ -1,0 +1,19 @@
+import { useI18n } from '../lib/i18n';
+
+const ACCENT = '{[ brand.primary ]}';
+
+export function LanguageSwitcher() {
+  const { locale, setLocale } = useI18n();
+  const next: 'zh' | 'en' = locale === 'zh' ? 'en' : 'zh';
+  return (
+    <button
+      type="button"
+      onClick={() => setLocale(next)}
+      className="text-xs px-2.5 py-1 rounded-md border hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+      style={{ color: ACCENT, borderColor: ACCENT }}
+      aria-label={`Switch language to ${next === 'zh' ? '中文' : 'English'}`}
+    >
+      {locale === 'zh' ? 'EN' : '中'}
+    </button>
+  );
+}

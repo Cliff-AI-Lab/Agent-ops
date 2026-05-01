@@ -1,0 +1,10 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "content": "# Placeholder"
+    }
+  ],
+  "dependencies": {},
+  "entrypoint": "README.md"
+}

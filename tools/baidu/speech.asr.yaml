@@ -1,0 +1,39 @@
+tool_id: baidu.speech.asr
+version: 0.1.0
+name: 百度语音识别 ASR(极速版)
+description: |
+  把语音转成文字。支持 16k/8k 采样率,中文普通话 + 英文 + 粤语方言。
+  单次最长 60 秒音频;超长音频需调极速版长语音接口。
+provider: Baidu AI
+category: speech_asr
+tags: [mandarin, cantonese, english, realtime]
+input_schema:
+  type: object
+  required: [audio, format]
+  properties:
+    audio: { type: string, description: "base64 音频内容" }
+    format: { type: string, enum: [pcm, wav, amr, m4a] }
+    rate: { type: integer, enum: [8000, 16000], default: 16000 }
+    dev_pid:
+      type: integer
+      description: 模型 id · 1537 普通话 · 1737 英文 · 1637 粤语
+      default: 1537
+output_schema:
+  type: object
+  properties:
+    result: { type: array, items: { type: string } }
+    confidence: { type: number }
+transport_type: http
+endpoint: https://vop.baidu.com/server_api
+auth_mode: api_key
+auth_env_vars: [BAIDU_ASR_API_KEY, BAIDU_ASR_SECRET_KEY]
+pricing_model: per_call
+cost_per_call: 0.004
+rate_limit_per_minute: 60
+expected_latency_ms: 1500
+docs_url: https://cloud.baidu.com/doc/SPEECH/s/0lbxfnc9b
+examples:
+  - title: 识别会议录音 30 秒
+    input: { audio: "<base64 pcm>", format: "pcm", rate: 16000, dev_pid: 1537 }
+    output_hint: result[0] 为识别的文字串
+activation_status: active

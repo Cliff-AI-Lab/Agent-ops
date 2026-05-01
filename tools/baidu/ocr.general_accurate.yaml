@@ -1,0 +1,42 @@
+tool_id: baidu.ocr.general_accurate
+version: 0.1.0
+name: 百度 OCR · 通用文字识别(高精度)
+description: |
+  百度 AI 开放平台的高精度通用 OCR。适合扫描件、照片、发票、合同等场景。
+  支持中英文混合,默认返回文本 + 位置坐标。
+provider: Baidu AI
+category: ocr
+tags: [chinese, english, mixed, bbox, printed]
+input_schema:
+  type: object
+  required: [image]
+  properties:
+    image:
+      type: string
+      description: base64-encoded image bytes OR https URL
+    detect_direction: { type: boolean, default: false }
+    paragraph: { type: boolean, default: false }
+output_schema:
+  type: object
+  properties:
+    words_result:
+      type: array
+      items:
+        type: object
+        properties:
+          words: { type: string }
+          location: { type: object }
+transport_type: http
+endpoint: https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic
+auth_mode: api_key
+auth_env_vars: [BAIDU_OCR_API_KEY, BAIDU_OCR_SECRET_KEY]
+pricing_model: per_call
+cost_per_call: 0.005
+rate_limit_per_minute: 50
+expected_latency_ms: 1200
+docs_url: https://cloud.baidu.com/doc/OCR/s/1k3h7y3db
+examples:
+  - title: 识别发票照片
+    input: { image: "<base64 of invoice.jpg>", detect_direction: true }
+    output_hint: 返回 words_result 数组,每个元素含识别文字 + bounding box
+activation_status: active

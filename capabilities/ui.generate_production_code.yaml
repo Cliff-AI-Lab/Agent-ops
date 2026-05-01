@@ -1,0 +1,27 @@
+capability_id: ui.generate_production_code
+version: 0.1.0
+name: Generate Vite + React + shadcn/ui production code
+description: |
+  Phase 3 of the UI pipeline. Given a chosen prototype variant and the parent
+  UIBlueprint, produces a complete CodeArtifact (typically 20-30 files covering
+  package.json, tsconfig, vite.config, tailwind.config, src/App.tsx, pages, and
+  the shadcn/ui component subset the pages actually use).
+owner: raytone-ui
+input_schema_ref: pipeline:Phase3Input
+output_schema_ref: ontology:CodeArtifact
+allowed_tools: []
+forbidden_actions:
+  - file_write
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.80
+latency_budget_ms: 180000
+quality_checks:
+  - schema-valid
+  - entrypoint-exists
+  - package-json-valid
+fallback_capabilities: []
+eval_suite_ids:
+  - ui-phase3-golden
+activation_status: active

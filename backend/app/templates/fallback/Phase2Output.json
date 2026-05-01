@@ -1,0 +1,19 @@
+{
+  "variants": [
+    {
+      "name": "fallback-minimal-a",
+      "description": "Fallback prototype (generation failed). Minimal placeholder.",
+      "html": "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fallback A</title><script src=\"https://cdn.tailwindcss.com\"></script></head><body class=\"bg-slate-50 p-8\"><h1 class=\"text-2xl font-bold\">Fallback variant A</h1><p class=\"text-slate-600 mt-2\">原型生成失败,已降级到兜底模板。</p></body></html>"
+    },
+    {
+      "name": "fallback-minimal-b",
+      "description": "Fallback prototype (generation failed). Minimal placeholder.",
+      "html": "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fallback B</title><script src=\"https://cdn.tailwindcss.com\"></script></head><body class=\"bg-white p-8\"><h1 class=\"text-2xl font-bold text-indigo-700\">Fallback variant B</h1><p class=\"text-slate-600 mt-2\">原型生成失败,已降级到兜底模板。</p></body></html>"
+    },
+    {
+      "name": "fallback-minimal-c",
+      "description": "Fallback prototype (generation failed). Minimal placeholder.",
+      "html": "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fallback C</title><script src=\"https://cdn.tailwindcss.com\"></script></head><body class=\"bg-slate-900 text-slate-100 p-8\"><h1 class=\"text-2xl font-bold\">Fallback variant C</h1><p class=\"text-slate-400 mt-2\">原型生成失败,已降级到兜底模板。</p></body></html>"
+    }
+  ]
+}

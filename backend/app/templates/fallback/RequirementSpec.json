@@ -1,0 +1,7 @@
+{
+  "product_name": "Fallback Product",
+  "target_users": ["default user"],
+  "core_pages": ["home"],
+  "reference_brands": [],
+  "special_requirements": []
+}

@@ -1,0 +1,26 @@
+capability_id: ui.generate_prototypes
+version: 0.1.0
+name: Generate 3 HTML prototype variants
+description: |
+  Phase 2 of the UI pipeline. Given a UIBlueprint, produces three visually
+  distinct HTML prototypes (React + Babel Standalone, Tailwind CDN) for user
+  selection. Runs through L4 Repair with Phase2Output schema; falls back to
+  static templates when the LLM fails max_repairs times.
+owner: raytone-ui
+input_schema_ref: ontology:UIBlueprint
+output_schema_ref: pipeline:Phase2Output
+allowed_tools: []
+forbidden_actions:
+  - file_write
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.40
+latency_budget_ms: 240000
+quality_checks:
+  - schema-valid
+  - variants-count-equals-three
+fallback_capabilities: []
+eval_suite_ids:
+  - ui-phase2-golden
+activation_status: active

@@ -1,0 +1,71 @@
+agent_id: agents.customer_service
+version: 0.1.0
+name: 语音客服助手
+description: |
+  语音客服 Agent。接收用户的音频请求(电话 / Web 录音),先用 baidu.speech.asr
+  转文字,再由 LLM 按预设的业务知识库和话术框架回复,最后用 baidu.speech.tts
+  把回复合成自然语音输出。支持多轮上下文 + 人工转接判断。
+
+  典型场景:电话客服、车载语音助理、IVR 升级、售后工单初审。
+owner: agent-ops-platform
+
+capabilities_used: []
+tools_used:
+  - baidu.speech.asr
+  - baidu.speech.tts
+entry_capability: null
+
+intent_keywords:
+  - 语音客服
+  - 电话助理
+  - 呼叫中心
+  - IVR 升级
+  - voice agent
+  - call center
+  - ivr
+  - phone support
+  - tts
+  - asr
+tags: [voice, multi-turn, customer-facing, escalation]
+
+examples:
+  - title: 查询订单状态
+    user_intent: 用户打电话问"我上周下的订单到哪了"
+    expected_outcome: 语音回复订单物流状态,若检测到"投诉"倾向则标记转人工
+  - title: 开通服务咨询
+    user_intent: 用户问如何开通某会员
+    expected_outcome: 分步引导开通,结束时询问是否需要短信发送链接
+
+input_schema:
+  type: object
+  required: [audio_or_text]
+  properties:
+    audio_or_text:
+      oneOf:
+        - { type: string, format: uri, description: "音频 URL" }
+        - { type: string, description: "文本(测试 / ASR 已解析)" }
+    session_id: { type: string }
+    business_context:
+      type: object
+      description: "当前业务域(订单 / 会员 / 售后 / ...)"
+output_schema:
+  type: object
+  properties:
+    reply_text: { type: string }
+    reply_audio_url: { type: string, format: uri }
+    escalate_to_human: { type: boolean }
+    intent: { type: string }
+
+transport_type: local
+risk_level: medium
+cost_budget: 0.10
+latency_budget_ms: 4500
+runtime_config:
+  asr_language: zh-CN
+  tts_voice: female_soft
+  escalation_keywords: ["投诉", "经理", "升级"]
+  supports_streaming: true
+
+eval_suite_ids: []
+is_generated: false
+activation_status: active

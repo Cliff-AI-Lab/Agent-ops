@@ -1,0 +1,15 @@
+{
+  "pages": [
+    {
+      "route": "/",
+      "title": "Home",
+      "components": ["hero"],
+      "data_fields": ["headline"]
+    }
+  ],
+  "brand": {
+    "primary": "#0F62FE",
+    "font": "IBM Plex Sans",
+    "radius": "md"
+  }
+}

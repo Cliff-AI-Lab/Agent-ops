@@ -1,0 +1,45 @@
+tool_id: web.search.tavily
+version: 0.1.0
+name: Tavily AI 搜索
+description: |
+  专为 LLM 优化的搜索 API,返回已经提炼、去噪、带源的结果,比传统 SERP
+  更适合 RAG 与工具调用。支持按 topic / date / domain 过滤。
+provider: Tavily
+category: web_search
+tags: [rag, llm-friendly, citation]
+input_schema:
+  type: object
+  required: [query]
+  properties:
+    query: { type: string }
+    max_results: { type: integer, default: 5 }
+    search_depth: { type: string, enum: [basic, advanced], default: basic }
+    include_domains: { type: array, items: { type: string } }
+    exclude_domains: { type: array, items: { type: string } }
+output_schema:
+  type: object
+  properties:
+    answer: { type: string }
+    results:
+      type: array
+      items:
+        type: object
+        properties:
+          title: { type: string }
+          url: { type: string }
+          content: { type: string }
+          score: { type: number }
+transport_type: http
+endpoint: https://api.tavily.com/search
+auth_mode: api_key
+auth_env_vars: [TAVILY_API_KEY]
+pricing_model: per_call
+cost_per_call: 0.005
+rate_limit_per_minute: 100
+expected_latency_ms: 2000
+docs_url: https://docs.tavily.com/docs/rest-api/api-reference
+examples:
+  - title: 搜索最新 AI 新闻
+    input: { query: "latest Anthropic Claude release", max_results: 3 }
+    output_hint: answer 是提炼摘要,results 是带 url 的证据列表
+activation_status: active

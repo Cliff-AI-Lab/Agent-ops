@@ -1,0 +1,26 @@
+capability_id: dialog.receptionist_turn
+version: 0.1.0
+name: Receptionist conversation turn
+description: |
+  Advances a dialog Session by one turn. Produces structured three-section
+  receptionist reply (Understood / Need-to-know / Next-step) and may transition
+  state collecting -> clarifying -> confirming. When user_turns >= 3 or the
+  user says "proceed" keyword, fills RequirementSpec via L4 Repair.
+owner: raytone-ui
+input_schema_ref: ontology:SessionTurn
+output_schema_ref: ontology:SessionTurnResult
+allowed_tools: []
+forbidden_actions:
+  - file_write
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.02
+latency_budget_ms: 30000
+quality_checks:
+  - schema-valid
+  - structured-three-sections
+fallback_capabilities: []
+eval_suite_ids:
+  - receptionist-golden
+activation_status: active

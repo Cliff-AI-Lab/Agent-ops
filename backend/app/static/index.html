@@ -1,0 +1,2107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Agent Ops — Heterogeneous Agent Operations Runtime</title>
+<!-- Google Fonts loaded non-blocking; system font fallback used if blocked/slow -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700;900&family=Inter:wght@200;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700;900&family=Inter:wght@200;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
+<script src="/static/vendor/tailwindcss.js"></script>
+<!-- Cytoscape + dagre layout for the Knowledge Graph tab (Batch C+++) -->
+<script src="/static/vendor/cytoscape.min.js" defer></script>
+<script src="/static/vendor/dagre.min.js" defer></script>
+<script src="/static/vendor/cytoscape-dagre.js" defer></script>
+<!-- Markdown renderer for the Wiki tab (Batch Y) -->
+<script src="/static/vendor/marked.min.js" defer></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          // Nordic frost palette
+          primary: {
+            50:'#EAF3F8', 100:'#D3E6EE', 200:'#B8D4DE',
+            300:'#A2CADC', 400:'#88C0D0', 500:'#5E81AC',
+            600:'#4C6A99', 700:'#3B5378', 800:'#2E4260',
+          },
+          // Aurora layer palette (L1-L6 差异化)
+          l1:'#81A1C1', l2:'#B48EAD', l3:'#A3BE8C',
+          l4:'#EBCB8B', l5:'#BF616A', l6:'#88C0D0',
+        },
+        fontFamily: {
+          display: ['Space Grotesk','system-ui','sans-serif'],
+          sans: ['Inter','system-ui','sans-serif'],
+          mono: ['JetBrains Mono','ui-monospace','SFMono-Regular','Menlo','Consolas','monospace'],
+        },
+      }
+    }
+  };
+</script>
+<style>
+  /* ============ Design tokens — Nordic Minimalism + Aurora ============ */
+  :root {
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --w-thin: 200; --w-book: 400; --w-bold: 700; --w-black: 900;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-power: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Nordic Snow (light) */
+    --bg-base: #ECEFF4;
+    --bg-panel: #FFFFFF;
+    --bg-elev: #F7F9FC;
+    --bg-subtle: #E5E9F0;
+    --border: rgba(46, 52, 64, 0.08);
+    --border-strong: rgba(46, 52, 64, 0.15);
+    --text: #2E3440;
+    --text-secondary: #4C566A;
+    --text-muted: #7B8A9E;
+
+    --accent: #5E81AC;        /* frost deep */
+    --accent-bright: #88C0D0; /* frost light */
+    --success: #A3BE8C;
+    --warning: #EBCB8B;
+    --error: #BF616A;
+
+    --l1: #81A1C1; --l2: #B48EAD; --l3: #A3BE8C;
+    --l4: #EBCB8B; --l5: #BF616A; --l6: #88C0D0;
+  }
+  html.dark {
+    --bg-base: #1B1E26;
+    --bg-panel: #242830;
+    --bg-elev: #2E3440;
+    --bg-subtle: #353B48;
+    --border: rgba(236, 239, 244, 0.08);
+    --border-strong: rgba(236, 239, 244, 0.15);
+    --text: #ECEFF4;
+    --text-secondary: #D8DEE9;
+    --text-muted: #8B95A6;
+  }
+
+  /* ============ Base ============ */
+  body {
+    font-family: var(--font-body);
+    font-weight: var(--w-thin);
+    font-size: 14px;
+    letter-spacing: 0.005em;
+    background-color: var(--bg-base);
+    color: var(--text);
+    /* Layered background: aurora radials + grid + subtle noise */
+    background-image:
+      radial-gradient(1200px circle at 8% 0%, rgba(136, 192, 208, 0.12), transparent 45%),
+      radial-gradient(1000px circle at 92% 0%, rgba(180, 142, 173, 0.08), transparent 45%),
+      radial-gradient(900px circle at 100% 100%, rgba(163, 190, 140, 0.07), transparent 50%),
+      linear-gradient(rgba(46, 52, 64, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(46, 52, 64, 0.025) 1px, transparent 1px);
+    background-size: auto, auto, auto, 80px 80px, 80px 80px;
+    background-attachment: fixed;
+  }
+  html.dark body {
+    background-image:
+      radial-gradient(1200px circle at 8% 0%, rgba(94, 129, 172, 0.18), transparent 45%),
+      radial-gradient(1000px circle at 92% 0%, rgba(180, 142, 173, 0.12), transparent 45%),
+      radial-gradient(900px circle at 100% 100%, rgba(163, 190, 140, 0.09), transparent 50%),
+      linear-gradient(rgba(236, 239, 244, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(236, 239, 244, 0.03) 1px, transparent 1px);
+    background-size: auto, auto, auto, 80px 80px, 80px 80px;
+  }
+
+  /* Typography — Space Grotesk for display, extreme weight contrast */
+  h1, h2, h3, .display { font-family: var(--font-display); font-weight: var(--w-black); letter-spacing: -0.035em; }
+  .mono, code, pre, .font-mono { font-family: var(--font-mono); }
+
+  /* Tailwind base overrides to Nordic palette (non-invasive: only body + specific slate-* classes) */
+  body.bg-slate-50 { background-color: var(--bg-base) !important; color: var(--text) !important; }
+  html.dark body { background-color: var(--bg-base) !important; color: var(--text) !important; }
+  /* Text muted overrides — don't touch text-white / text-primary / text-emerald etc. */
+  .text-slate-400, .text-slate-500 { color: var(--text-muted) !important; }
+  .text-slate-600, .text-slate-700, .text-slate-800, .text-slate-900 { color: var(--text-secondary) !important; }
+  html.dark .text-slate-100, html.dark .text-slate-200, html.dark .text-slate-300 { color: var(--text-secondary) !important; }
+  html.dark .text-slate-400, html.dark .text-slate-500 { color: var(--text-muted) !important; }
+  /* Panel backgrounds — ONLY when these classes appear on panels, not on buttons/bubbles */
+  .bg-white { background-color: var(--bg-panel) !important; }
+  html.dark .bg-slate-900, html.dark .bg-slate-800 { background-color: var(--bg-panel) !important; }
+  html.dark .bg-slate-800\/40, html.dark .bg-slate-800\/50 { background-color: var(--bg-elev) !important; }
+  .bg-slate-50 { background-color: var(--bg-elev) !important; }
+  .border-slate-200, html.dark .border-slate-800, html.dark .border-slate-700 { border-color: var(--border) !important; }
+
+  /* ============ Screens ============ */
+  .screen { display: none; }
+  .screen.active { display: flex; flex-direction: column; flex: 1; }
+
+  /* ============ Staggered page-load animation ============ */
+  .fade-in { opacity: 0; animation: fadeInUp 0.7s var(--ease) forwards; }
+  .stagger-1 { animation-delay: 0.05s; }
+  .stagger-2 { animation-delay: 0.12s; }
+  .stagger-3 { animation-delay: 0.20s; }
+  .stagger-4 { animation-delay: 0.28s; }
+  .stagger-5 { animation-delay: 0.36s; }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(22px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .scale-in { opacity: 0; animation: scaleIn 0.6s var(--ease) forwards; }
+  @keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .msg-enter { animation: slideIn .28s var(--ease); }
+  @keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0);} }
+  .trace-line { animation: traceEnter .22s var(--ease); }
+  @keyframes traceEnter { from { opacity:0; transform:translateX(-6px); } to { opacity:1; transform:translateX(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .fade-in, .scale-in, .msg-enter, .trace-line { animation: none; opacity: 1; transform: none; }
+  }
+
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .drawer { transform: translateX(100%); transition: transform .32s var(--ease); }
+  .drawer.open { transform: translateX(0); }
+
+  /* ============ Batch J — Triage badge (centered chip between user/assistant msgs) ============ */
+  .triage-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    transition: filter .15s var(--ease), transform .15s var(--ease);
+  }
+  .triage-chip:hover { filter: brightness(1.05); transform: translateY(-1px); }
+  .triage-chip-receptionist     { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+  .triage-chip-intent_router    { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+  .triage-chip-generated_agent  { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .triage-chip-help             { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+  .dark .triage-chip-receptionist    { background: rgba(16,185,129,.15); color: #6ee7b7; border-color: rgba(16,185,129,.4); }
+  .dark .triage-chip-intent_router   { background: rgba(99,102,241,.15); color: #a5b4fc; border-color: rgba(99,102,241,.4); }
+  .dark .triage-chip-generated_agent { background: rgba(245,158,11,.15); color: #fcd34d; border-color: rgba(245,158,11,.4); }
+  .dark .triage-chip-help            { background: rgba(100,116,139,.15); color: #cbd5e1; border-color: rgba(100,116,139,.4); }
+  .triage-chip-fallback { outline: 1px dashed currentColor; outline-offset: 2px; }
+  .triage-chip-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; opacity: .8;
+  }
+  .triage-detail {
+    margin-top: 6px;
+    max-width: 88%;
+    border-left: 2px solid currentColor;
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    border-radius: 6px;
+    background: rgba(0,0,0,.02);
+    color: var(--text-muted, #64748b);
+  }
+  .dark .triage-detail { background: rgba(255,255,255,.04); }
+
+  /* ============ Panels — Nordic soft elevation ============ */
+  #screen-welcome > div > .bg-white,
+  #screen-workspace > div > div {
+    background-color: var(--bg-panel) !important;
+    border: 1px solid var(--border);
+    box-shadow:
+      0 1px 2px rgba(46, 52, 64, 0.04),
+      0 12px 36px -20px rgba(46, 52, 64, 0.12);
+    backdrop-filter: saturate(1.1);
+  }
+  html.dark #screen-welcome > div > .bg-white,
+  html.dark #screen-workspace > div > div {
+    background-color: var(--bg-panel) !important;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 12px 36px -20px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Hero display — extreme weight + tight tracking */
+  #screen-welcome h1 {
+    font-family: var(--font-display);
+    font-weight: var(--w-black);
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    line-height: 1.05;
+    letter-spacing: -0.045em;
+    background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  html.dark #screen-welcome h1 {
+    background: linear-gradient(135deg, var(--text) 0%, var(--accent-bright) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #screen-welcome p { font-weight: var(--w-thin); font-size: 1.05rem; line-height: 1.6; color: var(--text-secondary); }
+
+  /* ============ Primary buttons — Frost gradient ============ */
+  #btn-start, #btn-send, #btn-confirm, #btn-download {
+    font-family: var(--font-display);
+    font-weight: var(--w-bold);
+    letter-spacing: 0.01em;
+    background-image: linear-gradient(135deg, var(--accent-bright) 0%, var(--accent) 100%);
+    color: #fff !important;
+    box-shadow: 0 2px 10px rgba(94, 129, 172, 0.35), inset 0 1px 0 rgba(255,255,255,0.22);
+    transition: box-shadow .22s var(--ease), transform .12s var(--ease), background-image .22s var(--ease);
+    border: 1px solid rgba(94, 129, 172, 0.3);
+  }
+  #btn-start:hover, #btn-send:hover, #btn-confirm:hover, #btn-download:hover {
+    background-image: linear-gradient(135deg, var(--accent) 0%, #3B5378 100%);
+    box-shadow: 0 6px 22px rgba(94, 129, 172, 0.52), inset 0 1px 0 rgba(255,255,255,0.28);
+    transform: translateY(-1px);
+  }
+  #btn-start:active, #btn-send:active, #btn-confirm:active, #btn-download:active {
+    transform: translateY(0); box-shadow: 0 2px 8px rgba(94, 129, 172, 0.3);
+  }
+  #btn-start:disabled, #btn-send:disabled, #btn-confirm:disabled, #btn-download:disabled {
+    background-image: linear-gradient(135deg, #B8D4DE 0%, #A2CADC 100%);
+    box-shadow: none; transform: none; color: rgba(255,255,255,0.7) !important;
+  }
+  #btn-start > *:last-child { transition: transform .25s var(--ease); display: inline-block; }
+  #btn-start:hover > *:last-child { transform: translateX(4px); }
+
+  /* User message bubble — accent gradient */
+  #messages .msg-enter.justify-end > div {
+    background-image: linear-gradient(135deg, var(--accent-bright) 0%, var(--accent) 100%) !important;
+    color: #fff !important;
+    font-weight: var(--w-book);
+    box-shadow: 0 2px 10px rgba(94, 129, 172, 0.3);
+    border: none !important;
+  }
+
+  /* ============ Workflow stepper — bold cards ============ */
+  .wf-step { padding: 6px 4px; border-radius: 10px; transition: background-color .2s var(--ease); }
+  .wf-step.wf-current {
+    background: linear-gradient(135deg, rgba(136,192,208,0.1) 0%, rgba(94,129,172,0.08) 100%);
+  }
+  html.dark .wf-step.wf-current {
+    background: linear-gradient(135deg, rgba(136,192,208,0.15) 0%, rgba(94,129,172,0.12) 100%);
+  }
+  .wf-dot {
+    font-family: var(--font-display);
+    font-weight: var(--w-bold);
+    transition: all .3s var(--ease);
+  }
+  .wf-current .wf-dot {
+    background: linear-gradient(135deg, var(--accent-bright) 0%, var(--accent) 100%) !important;
+    color: #fff !important;
+    box-shadow: 0 0 0 4px rgba(136,192,208,0.22), 0 4px 12px rgba(94,129,172,0.38);
+    animation: pulseGlow 2s var(--ease) infinite;
+  }
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(136,192,208,0.22), 0 4px 12px rgba(94,129,172,0.38); }
+    50%      { box-shadow: 0 0 0 8px rgba(136,192,208,0.08), 0 6px 18px rgba(94,129,172,0.5); }
+  }
+  .wf-current .wf-label { color: var(--accent) !important; font-weight: var(--w-bold); }
+  html.dark .wf-current .wf-label { color: var(--accent-bright) !important; }
+  .wf-step[data-done] .wf-dot { background: var(--success) !important; color: #fff !important; }
+  .wf-arrow { font-family: var(--font-mono); color: var(--text-muted); padding: 0 2px; }
+
+  /* ============ Trace panel — human-friendly + data stream ============ */
+  #trace-list { line-height: 1.55; }
+  #trace-list .trace-line {
+    padding: 8px 10px 8px 14px;
+    position: relative;
+    border-radius: 6px;
+    transition: background-color .2s ease;
+    animation: traceEnter .22s var(--ease);
+  }
+  .trace-human {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: var(--w-book);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .trace-meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: var(--w-book);
+    color: var(--text-muted);
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  /* Running (active) trace line — subtle pulse + slightly emphasized bg */
+  #trace-list .trace-line[data-running-key] {
+    background: linear-gradient(90deg, rgba(136,192,208,0.09), transparent 70%);
+    box-shadow: inset 3px 0 0 var(--accent-bright);
+  }
+  html.dark #trace-list .trace-line[data-running-key] {
+    background: linear-gradient(90deg, rgba(136,192,208,0.12), transparent 70%);
+  }
+  /* Resolved running line — subdued */
+  #trace-list .trace-line.trace-resolved {
+    background: transparent; box-shadow: none; opacity: 0.78;
+  }
+  /* ============ Claude-Code style dot/asterisk cursor ============ */
+  .trace-dot {
+    display: inline-block;
+    position: relative;
+    width: 14px; height: 14px;
+    margin-top: 2px;
+    flex: none;
+  }
+  /* Base dot (done / fail / neutral) — solid circle */
+  .trace-dot::before {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 2px currentColor inset;
+    transition: background-color .25s var(--ease);
+  }
+  .trace-dot-done    { color: var(--success); }
+  .trace-dot-fail    { color: var(--error); }
+  .trace-dot-neutral { color: var(--text-muted); opacity: 0.55; }
+
+  /* Running — amber asterisk with pulse + rotation (Claude-style) */
+  .trace-dot-running { color: #F59E0B; }
+  .trace-dot-running::before {
+    background: transparent;
+    box-shadow: none;
+    inset: 0;
+    border-radius: 0;
+    background-image: radial-gradient(circle at center, currentColor 40%, transparent 42%),
+                      linear-gradient(0deg, transparent 44%, currentColor 44% 56%, transparent 56%),
+                      linear-gradient(60deg, transparent 44%, currentColor 44% 56%, transparent 56%),
+                      linear-gradient(120deg, transparent 44%, currentColor 44% 56%, transparent 56%);
+    background-blend-mode: screen;
+    mask: radial-gradient(circle at center, black 0%, black 60%, transparent 100%);
+    -webkit-mask: radial-gradient(circle at center, black 0%, black 60%, transparent 100%);
+    animation: cursorSpin 1.25s linear infinite;
+  }
+  .trace-dot-running::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.18;
+    animation: cursorHalo 1.2s var(--ease) infinite;
+  }
+  @keyframes cursorSpin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  @keyframes cursorHalo {
+    0%, 100% { transform: scale(0.7); opacity: 0.35; }
+    50%      { transform: scale(1.15); opacity: 0.08; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trace-dot-running::before, .trace-dot-running::after { animation: none; }
+  }
+  #trace-list .trace-line::before {
+    content:''; position:absolute; left:0; top:10px; bottom:10px; width:3px;
+    background: var(--layer-color, rgba(148,163,184,0.3));
+    border-radius: 2px;
+  }
+  #trace-list .trace-line[data-layer="L1"] { --layer-color: var(--l1); }
+  #trace-list .trace-line[data-layer="L2"] { --layer-color: var(--l2); }
+  #trace-list .trace-line[data-layer="L3"] { --layer-color: var(--l3); }
+  #trace-list .trace-line[data-layer="L4"] { --layer-color: var(--l4); }
+  #trace-list .trace-line[data-layer="L5"] { --layer-color: var(--l5); }
+  #trace-list .trace-line[data-layer="L6"] { --layer-color: var(--l6); }
+  #trace-list .trace-line:hover { background: rgba(136,192,208,0.06); }
+  html.dark #trace-list .trace-line:hover { background: rgba(136,192,208,0.08); }
+
+  /* Trace layer badges — use aurora palette */
+  .layer-badge-L1 { background: rgba(129,161,193,0.16); color: var(--l1); }
+  .layer-badge-L2 { background: rgba(180,142,173,0.16); color: var(--l2); }
+  .layer-badge-L3 { background: rgba(163,190,140,0.18); color: #6a7e5c; }
+  html.dark .layer-badge-L3 { color: var(--l3); }
+  .layer-badge-L4 { background: rgba(235,203,139,0.2); color: #a68544; }
+  html.dark .layer-badge-L4 { color: var(--l4); }
+  .layer-badge-L5 { background: rgba(191,97,106,0.16); color: var(--l5); }
+  .layer-badge-L6 { background: rgba(136,192,208,0.2); color: #4a7885; }
+  html.dark .layer-badge-L6 { color: var(--l6); }
+  .layer-badge-sys { background: rgba(148,163,184,0.16); color: var(--text-muted); }
+
+  /* ============ State & session badges ============ */
+  #state-badge {
+    font-family: var(--font-display);
+    font-weight: var(--w-bold);
+    letter-spacing: 0.02em;
+    background: linear-gradient(135deg, rgba(136,192,208,0.16) 0%, rgba(94,129,172,0.12) 100%) !important;
+    color: var(--accent) !important;
+    border: 1px solid rgba(94,129,172,0.22);
+  }
+  html.dark #state-badge { color: var(--accent-bright) !important; }
+
+  /* File row selection — left accent */
+  .file-row.bg-primary-50 { box-shadow: inset 3px 0 0 var(--accent); background: rgba(136,192,208,0.08) !important; }
+
+  /* Code preview — monospaced + darker base */
+  #file-preview { font-family: var(--font-mono); font-weight: var(--w-book); background: #2E3440 !important; color: #ECEFF4 !important; }
+
+  /* ============ Misc ============ */
+  pre { white-space: pre-wrap; word-break: break-all; }
+  ::selection { background: rgba(136,192,208,0.35); color: inherit; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  #messages::-webkit-scrollbar, #file-list::-webkit-scrollbar,
+  #file-preview::-webkit-scrollbar, .trace-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  #messages::-webkit-scrollbar-thumb, #file-list::-webkit-scrollbar-thumb,
+  #file-preview::-webkit-scrollbar-thumb, .trace-scroll::-webkit-scrollbar-thumb {
+    background: rgba(94, 129, 172, 0.3); border-radius: 3px;
+  }
+  html.dark #messages::-webkit-scrollbar-thumb, html.dark .trace-scroll::-webkit-scrollbar-thumb {
+    background: rgba(136, 192, 208, 0.25);
+  }
+  #drawer.open { box-shadow: -24px 0 56px -28px rgba(46,52,64,0.28); }
+  html.dark #drawer.open { box-shadow: -24px 0 56px -28px rgba(0,0,0,0.75); }
+
+  /* ============ Wiki shelf cards (Batch Y · distinctive-frontend 规范) ============ */
+  .wiki-card { cursor: pointer; transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease); }
+  .wiki-card:hover { transform: translateY(-2px); box-shadow: 0 4px 18px rgba(46,52,64,.08); border-color: var(--accent) !important; }
+  html.dark .wiki-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.3); }
+  .kind-chip:hover { transform: translateY(-1px); }
+
+  /* Markdown prose (detail pane) */
+  #wiki-detail-body h1 { font-family: var(--font-display); font-weight: var(--w-black); font-size: 1.25rem; letter-spacing: -0.02em; margin: 0 0 .6em; color: var(--text); }
+  #wiki-detail-body h2 { font-family: var(--font-display); font-weight: var(--w-bold); font-size: 1rem; letter-spacing: -0.01em; margin: 1.2em 0 .4em; color: var(--accent); }
+  html.dark #wiki-detail-body h2 { color: var(--accent-bright); }
+  #wiki-detail-body h3 { font-family: var(--font-display); font-weight: var(--w-bold); font-size: .9rem; margin: 1em 0 .3em; color: var(--text); }
+  #wiki-detail-body p { font-family: var(--font-body); font-weight: var(--w-thin); font-size: .8rem; line-height: 1.65; margin: 0 0 .6em; color: var(--text-secondary); }
+  #wiki-detail-body ul, #wiki-detail-body ol { margin: 0 0 .6em; padding-left: 1.25em; }
+  #wiki-detail-body li { font-family: var(--font-body); font-weight: var(--w-thin); font-size: .78rem; line-height: 1.6; color: var(--text-secondary); margin: .18em 0; }
+  #wiki-detail-body code { font-family: var(--font-mono); font-size: .72rem; background: var(--bg-elev); padding: 1px 5px; border-radius: 3px; color: var(--accent); }
+  html.dark #wiki-detail-body code { color: var(--accent-bright); }
+  #wiki-detail-body pre { font-family: var(--font-mono); font-size: .7rem; background: #2E3440 !important; color: #ECEFF4; padding: .7em 1em; border-radius: 6px; overflow-x: auto; margin: .6em 0; line-height: 1.5; }
+  #wiki-detail-body pre code { background: transparent; color: inherit; padding: 0; font-size: inherit; }
+  #wiki-detail-body blockquote { border-left: 3px solid var(--accent); padding-left: .8em; margin: .8em 0; color: var(--text-muted); font-style: italic; }
+  #wiki-detail-body strong { font-weight: var(--w-bold); color: var(--text); }
+  #wiki-detail-body table { font-size: .75rem; border-collapse: collapse; width: 100%; margin: .6em 0; }
+  #wiki-detail-body th, #wiki-detail-body td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  #wiki-detail-body th { background: var(--bg-elev); font-family: var(--font-display); font-weight: var(--w-bold); font-size: .72rem; }
+  #wiki-detail-body a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  html.dark #wiki-detail-body a { color: var(--accent-bright); }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased transition-colors flex flex-col h-screen overflow-hidden">
+
+<!-- ====================================================== TOP BAR -->
+<header class="border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur z-30 flex-none">
+  <div class="max-w-[1600px] mx-auto px-5 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded-md bg-gradient-to-br from-primary-500 to-primary-700 grid place-items-center text-white text-sm font-bold">A</div>
+      <span class="font-semibold tracking-tight">Agent Ops</span>
+      <span data-i18n="tagline" class="text-xs text-slate-500 dark:text-slate-400 hidden sm:inline">异构 Agent 运营运行时</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="badge-env" class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">env: ?</span>
+      <span id="badge-model" class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-primary-50 text-primary-700 dark:bg-primary-700/20 dark:text-primary-200 hidden"></span>
+      <span id="badge-health" class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">○ offline</span>
+      <button id="btn-settings" title="设置" class="w-9 h-9 grid place-items-center rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ====================================================== WORKFLOW STEPPER -->
+<nav class="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-none">
+  <div class="max-w-[1600px] mx-auto px-5 py-2.5">
+    <ol id="workflow" class="flex items-center gap-1.5 text-xs">
+      <li class="wf-step flex-1 min-w-0" data-step="collect">
+        <div class="flex items-center gap-2">
+          <span class="wf-dot w-7 h-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-500">1</span>
+          <div class="min-w-0">
+            <div class="wf-label font-medium truncate">① 对话澄清</div>
+            <div class="wf-hint text-slate-400 dark:text-slate-500 truncate" data-i18n="wf_collect_hint">L2 Receptionist</div>
+          </div>
+        </div>
+      </li>
+      <li class="wf-arrow text-slate-300 dark:text-slate-600">→</li>
+      <li class="wf-step flex-1 min-w-0" data-step="confirm">
+        <div class="flex items-center gap-2">
+          <span class="wf-dot w-7 h-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-500">2</span>
+          <div class="min-w-0">
+            <div class="wf-label font-medium truncate">② 确认需求</div>
+            <div class="wf-hint text-slate-400 dark:text-slate-500 truncate" data-i18n="wf_confirm_hint">L3 MetaAgent · L4 Repair</div>
+          </div>
+        </div>
+      </li>
+      <li class="wf-arrow text-slate-300 dark:text-slate-600">→</li>
+      <li class="wf-step flex-1 min-w-0" data-step="generate">
+        <div class="flex items-center gap-2">
+          <span class="wf-dot w-7 h-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-500">3</span>
+          <div class="min-w-0">
+            <div class="wf-label font-medium truncate">③ 生成代码</div>
+            <div class="wf-hint text-slate-400 dark:text-slate-500 truncate" data-i18n="wf_generate_hint">L5 Phase2 → Phase3</div>
+          </div>
+        </div>
+      </li>
+      <li class="wf-arrow text-slate-300 dark:text-slate-600">→</li>
+      <li class="wf-step flex-1 min-w-0" data-step="deliver">
+        <div class="flex items-center gap-2">
+          <span class="wf-dot w-7 h-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-500">4</span>
+          <div class="min-w-0">
+            <div class="wf-label font-medium truncate">④ 下载交付</div>
+            <div class="wf-hint text-slate-400 dark:text-slate-500 truncate" data-i18n="wf_deliver_hint">L6 Packager · zip</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+  </div>
+</nav>
+
+<!-- ====================================================== ERROR BAR -->
+<div id="error-bar" class="hidden max-w-[1600px] mx-auto px-5 pt-2 flex-none w-full">
+  <div class="bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700/50 dark:text-amber-200 rounded-lg px-4 py-2 text-sm flex items-center justify-between">
+    <span id="error-msg">⚠ error</span>
+    <button id="error-close" class="text-amber-600 hover:text-amber-900 dark:text-amber-300">✕</button>
+  </div>
+</div>
+
+<!-- ====================================================== SCREEN: WELCOME -->
+<section id="screen-welcome" class="screen active flex-1 overflow-y-auto">
+  <div class="max-w-3xl mx-auto w-full px-6 py-16">
+    <div class="fade-in stagger-1 mb-5 inline-flex items-center gap-2 px-3 h-7 rounded-full text-xs font-mono" style="background:rgba(136,192,208,0.12);color:var(--accent);border:1px solid rgba(94,129,172,0.22)">
+      <span class="w-1.5 h-1.5 rounded-full" style="background:var(--success)"></span>
+      <span data-i18n="ready_badge">L1—L6 Harness 已就绪</span>
+    </div>
+    <h1 data-i18n="hero_title" class="fade-in stagger-2 mb-4">一句话,生成一个可部署的应用</h1>
+    <p data-i18n="hero_sub" class="fade-in stagger-3 mb-10 max-w-2xl">描述你想要的产品,系统通过对话澄清需求,走 L3 编排 + L4 稳定性内核,生成 Vite + React + shadcn/ui 完整项目。</p>
+
+    <div class="fade-in stagger-4 rounded-2xl p-6">
+      <textarea id="sop-input" rows="4" data-i18n-placeholder="sop_placeholder"
+        placeholder="例:做一个团队任务看板,首页显示任务列表,支持按状态筛选"
+        class="w-full resize-none rounded-xl border px-4 py-3 text-sm leading-relaxed focus:outline-none"
+        style="background:var(--bg-elev);border-color:var(--border);color:var(--text);font-weight:400"></textarea>
+      <div class="flex items-center justify-between mt-4 flex-wrap gap-3">
+        <div id="samples" class="flex flex-wrap gap-2"></div>
+        <button id="btn-start"
+          class="h-11 px-6 rounded-xl text-sm inline-flex items-center gap-2">
+          <span data-i18n="start_btn">开始对话</span> →
+        </button>
+      </div>
+    </div>
+
+    <p data-i18n="welcome_hint" class="fade-in stagger-5 text-xs mt-6" style="color:var(--text-muted)">请先在右上角 ⚙ 配置睿动 API Key 和默认模型。</p>
+  </div>
+</section>
+
+<!-- ====================================================== SCREEN: WORKSPACE (split) -->
+<section id="screen-workspace" class="screen flex-1 overflow-hidden">
+  <div class="max-w-[1600px] mx-auto w-full flex-1 flex gap-3 p-3 overflow-hidden">
+
+    <!-- ============ LEFT: CHAT ============ -->
+    <div class="flex-1 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden min-w-0">
+      <div class="flex items-center justify-between px-4 h-12 border-b border-slate-200 dark:border-slate-800 flex-none">
+        <div class="flex items-center gap-2 min-w-0">
+          <span id="state-badge" class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-primary-50 text-primary-700 dark:bg-primary-700/20 dark:text-primary-200 shrink-0">collecting</span>
+          <span id="session-label" class="text-xs text-slate-400 dark:text-slate-500 truncate"></span>
+        </div>
+        <button id="btn-reset" data-i18n="reset_btn" class="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 shrink-0">重新开始</button>
+      </div>
+      <div id="next-hint" class="mx-4 mt-3 bg-primary-50 dark:bg-primary-700/15 border border-primary-200 dark:border-primary-700/40 text-primary-900 dark:text-primary-100 rounded-lg px-3 py-2 text-xs flex items-start gap-2 flex-none">
+        <span class="text-base leading-none">👉</span>
+        <div id="next-hint-text" class="flex-1"></div>
+      </div>
+      <div id="messages" class="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0"></div>
+      <div id="chat-bar" class="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 px-3 py-3 flex-none"></div>
+    </div>
+
+    <!-- ============ RIGHT: TRACE / CODE TAB ============ -->
+    <div class="flex-1 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden min-w-0">
+      <div class="flex items-center justify-between px-3 h-12 border-b border-slate-200 dark:border-slate-800 flex-none">
+        <div class="flex items-center gap-1 text-sm">
+          <button data-tab="trace" class="tab-btn h-8 px-3 rounded-md flex items-center gap-1.5 text-xs font-medium">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+            <span data-i18n="tab_trace">Trace 流</span>
+          </button>
+          <button data-tab="code" class="tab-btn h-8 px-3 rounded-md flex items-center gap-1.5 text-xs font-medium">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M16 18 22 12 16 6"/><path d="M8 6 2 12 8 18"/></svg>
+            <span data-i18n="tab_code">代码产物</span>
+            <span id="tab-code-badge" class="hidden bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] rounded-full px-1.5 py-0.5">0</span>
+          </button>
+          <button data-tab="graph" class="tab-btn h-8 px-3 rounded-md flex items-center gap-1.5 text-xs font-medium">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" class="w-3.5 h-3.5"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><path d="M8 6h8M6 8v8M18 8v8M8 18h8M7.5 7.5l3 3M16.5 7.5l-3 3M7.5 16.5l3-3M16.5 16.5l-3-3"/></svg>
+            <span data-i18n="tab_graph">知识图谱</span>
+            <span id="tab-graph-badge" class="hidden bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 text-[10px] rounded-full px-1.5 py-0.5">0</span>
+          </button>
+          <button data-tab="wiki" class="tab-btn h-8 px-3 rounded-md flex items-center gap-1.5 text-xs font-medium">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" class="w-3.5 h-3.5"><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4Z"/><path d="M4 4v12a4 4 0 0 0 4 4"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+            <span data-i18n="tab_wiki">能力 Wiki</span>
+            <span id="tab-wiki-badge" class="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[10px] rounded-full px-1.5 py-0.5">—</span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="trace-status" class="text-xs text-slate-400 dark:text-slate-500">● 未连接</span>
+          <button id="btn-trace-clear" title="清空 Trace" class="text-xs text-slate-400 hover:text-slate-900 dark:hover:text-slate-100">清空</button>
+        </div>
+      </div>
+
+      <!-- Trace panel -->
+      <div id="tab-panel-trace" class="flex-1 flex flex-col min-h-0">
+        <div class="px-3 py-2 border-b border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex-none flex items-center gap-3 flex-wrap">
+          <span class="font-medium" data-i18n="legend">图例</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 grid place-items-center text-[9px] font-bold">L1</span>模型抽象</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 grid place-items-center text-[9px] font-bold">L2</span>对话</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 grid place-items-center text-[9px] font-bold">L3</span>编排</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 grid place-items-center text-[9px] font-bold">L4</span>稳定性</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 grid place-items-center text-[9px] font-bold">L5</span>生成管线</span>
+          <span class="inline-flex items-center gap-1"><span class="w-4 h-4 rounded bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300 grid place-items-center text-[9px] font-bold">L6</span>交付</span>
+        </div>
+        <div id="trace-list" class="flex-1 trace-scroll overflow-y-auto p-3 space-y-1 text-xs font-mono min-h-0"></div>
+        <div id="pipeline-steps" class="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-3 flex-none hidden">
+          <div class="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">生成管线进度</div>
+          <ol id="pipeline-step-list" class="space-y-2"></ol>
+        </div>
+      </div>
+
+      <!-- Code panel -->
+      <div id="tab-panel-code" class="flex-1 hidden flex-col min-h-0">
+        <div id="code-empty" class="flex-1 grid place-items-center text-sm text-slate-400 dark:text-slate-500 p-8 text-center">
+          <div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-10 h-10 mx-auto mb-3 opacity-40"><path d="M16 18 22 12 16 6"/><path d="M8 6 2 12 8 18"/></svg>
+            <div data-i18n="code_empty">代码产物会在生成完成后显示</div>
+          </div>
+        </div>
+        <div id="code-view" class="hidden flex-1 flex flex-col min-h-0">
+          <div class="flex items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-800 flex-none gap-3">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <span id="artifact-summary" class="text-xs text-slate-500 dark:text-slate-400 truncate"></span>
+            </div>
+            <button id="btn-download" class="h-8 px-3 rounded-md bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium inline-flex items-center gap-1.5">
+              <span data-i18n="download_btn">下载 zip</span> ↓
+            </button>
+          </div>
+          <div class="flex-1 flex min-h-0">
+            <div class="w-56 border-r border-slate-200 dark:border-slate-800 overflow-y-auto p-2 space-y-0.5 flex-none">
+              <div id="file-list" class="text-xs font-mono"></div>
+              <div class="pt-2 mt-2 border-t border-slate-200 dark:border-slate-800">
+                <div data-i18n="deps" class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1 px-1">依赖</div>
+                <div id="deps-list" class="text-[11px] font-mono space-y-0.5"></div>
+              </div>
+            </div>
+            <div class="flex-1 flex flex-col min-w-0">
+              <div class="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between flex-none">
+                <span id="preview-filename" class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate"></span>
+                <span id="preview-meta" class="text-[10px] text-slate-400 shrink-0"></span>
+              </div>
+              <pre id="file-preview" class="flex-1 overflow-auto text-xs bg-slate-950 text-slate-100 p-4 m-0"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wiki panel (Batch Y · three-tier registry shelf) -->
+      <div id="tab-panel-wiki" class="flex-1 hidden flex-col min-h-0">
+        <div class="px-3 py-2.5 border-b flex-none flex items-center gap-2 flex-wrap" style="border-color:var(--border)">
+          <div id="wiki-kinds" class="flex items-center gap-1"></div>
+          <input id="wiki-query" type="text"
+            placeholder="搜索能力… (意图关键词 / 名称 / 描述)"
+            class="flex-1 min-w-[160px] h-8 px-3 rounded-md text-xs"
+            style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);font-family:var(--font-body);font-weight:var(--w-thin)">
+          <div id="wiki-tier-stats" class="text-[10px] font-mono" style="color:var(--text-muted)"></div>
+        </div>
+        <div class="flex-1 flex min-h-0">
+          <div id="wiki-list" class="flex-1 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5 min-h-0 auto-rows-min"></div>
+          <div id="wiki-detail" class="w-[360px] border-l flex-none flex flex-col min-h-0" style="border-color:var(--border)">
+            <div class="px-3 py-2 border-b flex-none flex items-center justify-between gap-2" style="border-color:var(--border)">
+              <span class="text-[11px] uppercase tracking-wider font-semibold" style="color:var(--text-muted);font-family:var(--font-display)">详情 / Markdown</span>
+              <span id="wiki-detail-source" class="text-[10px] font-mono" style="color:var(--text-muted)"></span>
+            </div>
+            <div id="wiki-detail-body" class="flex-1 overflow-y-auto p-4 prose prose-sm max-w-none" style="color:var(--text)">
+              <div class="text-xs" style="color:var(--text-muted)">点击左侧卡片查看标准 MD 说明</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Knowledge Graph panel (Batch C+++) -->
+      <div id="tab-panel-graph" class="flex-1 hidden flex-col min-h-0">
+        <div id="graph-empty" class="flex-1 grid place-items-center text-sm p-8 text-center" style="color:var(--text-muted)">
+          <div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" class="w-10 h-10 mx-auto mb-3 opacity-40">
+              <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/>
+              <path d="M8 6h8M6 8v8M18 8v8M8 18h8M7.5 7.5l3 3M16.5 7.5l-3 3M7.5 16.5l3-3M16.5 16.5l-3-3"/>
+            </svg>
+            <div data-i18n="graph_empty">代码生成完成后,会在此显示文件之间的 import / 组件依赖关系图</div>
+          </div>
+        </div>
+        <div id="graph-view" class="hidden flex-1 flex-col min-h-0">
+          <div class="flex items-center justify-between px-3 h-10 border-b flex-none gap-3" style="border-color:var(--border)">
+            <div id="graph-stats" class="text-xs flex items-center gap-2.5 flex-wrap" style="color:var(--text-secondary)"></div>
+            <div class="flex items-center gap-2">
+              <select id="graph-layout" class="text-xs h-7 px-2 rounded-md border" style="background:var(--bg-elev);border-color:var(--border);color:var(--text)">
+                <option value="dagre">分层 (dagre)</option>
+                <option value="cose">力导向 (cose)</option>
+                <option value="breadthfirst">树形 (BFS)</option>
+                <option value="circle">环形</option>
+              </select>
+              <button id="btn-graph-refresh" class="text-xs h-7 px-2 rounded-md border hover:bg-slate-50 dark:hover:bg-slate-800" style="border-color:var(--border);color:var(--text-secondary)">刷新</button>
+            </div>
+          </div>
+          <div class="flex-1 flex min-h-0">
+            <div id="cy" class="flex-1 min-h-0" style="background:var(--bg-elev)"></div>
+            <div id="graph-side" class="w-64 border-l flex-none p-3 overflow-y-auto text-xs" style="border-color:var(--border);color:var(--text-secondary)">
+              <div class="font-semibold mb-2" style="color:var(--text)" data-i18n="graph_legend">图例</div>
+              <div class="space-y-1.5 mb-4">
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:#5e81ac"></span>文件</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:#a3be8c"></span>组件</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:#b48ead"></span>外部包</div>
+              </div>
+              <div class="font-semibold mb-2" style="color:var(--text)" data-i18n="graph_selected">选中节点</div>
+              <div id="graph-detail" style="color:var(--text-muted)">点击图中节点查看详情</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== SETTINGS DRAWER -->
+<div id="drawer-mask" class="hidden fixed inset-0 bg-black/30 dark:bg-black/60 z-40"></div>
+<aside id="drawer" class="drawer fixed right-0 top-0 bottom-0 w-[min(92vw,420px)] bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-xl z-50 overflow-y-auto">
+  <div class="flex items-center justify-between px-5 h-14 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900">
+    <h2 data-i18n="settings_title" class="font-semibold">设置</h2>
+    <button id="btn-close-drawer" class="text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl">✕</button>
+  </div>
+  <div class="p-5 space-y-6">
+    <section>
+      <h3 data-i18n="ruidong_section" class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">睿动配置</h3>
+      <div class="space-y-2.5 text-sm">
+        <div class="flex justify-between gap-3"><span class="text-slate-500 dark:text-slate-400" data-i18n="env_label">环境</span><span id="cfg-env" class="font-mono">—</span></div>
+        <div class="flex justify-between gap-3"><span class="text-slate-500 dark:text-slate-400" data-i18n="base_label">Base URL</span><span id="cfg-base" class="font-mono text-xs truncate">—</span></div>
+        <div class="flex justify-between gap-3"><span class="text-slate-500 dark:text-slate-400" data-i18n="key_label">API Key</span><span id="cfg-key" class="font-mono text-xs">—</span></div>
+        <div class="pt-1">
+          <label data-i18n="model_label" class="text-slate-500 dark:text-slate-400 block mb-1.5">默认模型</label>
+          <select id="cfg-model" class="w-full text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 h-9 focus:outline-none focus:ring-2 focus:ring-primary-500/30"></select>
+          <p data-i18n="model_hint" class="text-xs text-slate-400 dark:text-slate-500 mt-1.5">模型选择保存在浏览器;改 URL / Key 需编辑 .env.dev 重启。</p>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h3 data-i18n="theme_section" class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">主题</h3>
+      <div class="grid grid-cols-3 gap-2">
+        <button data-theme="light" class="theme-btn h-9 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-primary-500 text-sm transition-colors">☀ <span data-i18n="theme_light">浅色</span></button>
+        <button data-theme="dark"  class="theme-btn h-9 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-primary-500 text-sm transition-colors">🌙 <span data-i18n="theme_dark">深色</span></button>
+        <button data-theme="auto"  class="theme-btn h-9 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-primary-500 text-sm transition-colors">◐ <span data-i18n="theme_auto">跟随系统</span></button>
+      </div>
+    </section>
+    <section>
+      <h3 data-i18n="lang_section" class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">语言</h3>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-lang="zh" class="lang-btn h-9 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-primary-500 text-sm transition-colors">中文</button>
+        <button data-lang="en" class="lang-btn h-9 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-primary-500 text-sm transition-colors">English</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <h3 data-i18n="registry_section" class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">已注册能力(Registry · M2)</h3>
+        <span id="registry-count" class="text-[10px] font-mono text-slate-400">—</span>
+      </div>
+      <div id="registry-list" class="space-y-2 text-xs"></div>
+    </section>
+    <section class="pt-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500">
+      <div>Agent Harness · Sprint 1 MVP</div>
+      <div class="mt-1">Next.js 14 完整版 Sprint 2 上线</div>
+    </section>
+  </div>
+</aside>
+
+<!-- ====================================================== SCRIPT -->
+<script>
+/* ============ i18n ============ */
+const I18N = {
+  zh: {
+    tagline:'异构 Agent 运营运行时',
+    ready_badge:'L1—L6 Agent Ops 运行时在线',
+    hero_title:'一句话,生成一个可部署的应用',
+    hero_sub:'描述你想要的产品,系统通过对话澄清需求,然后生成 Vite + React + shadcn/ui 完整项目。',
+    sop_placeholder:'例:做一个团队任务看板,首页显示任务列表,支持按状态筛选',
+    start_btn:'开始对话',
+    welcome_hint:'请先在右上角 ⚙ 配置睿动 API Key 和默认模型。',
+    reset_btn:'重新开始',
+    tab_trace:'Trace 流',
+    tab_code:'代码产物',
+    tab_graph:'知识图谱',
+    tab_wiki:'能力 Wiki',
+    graph_empty:'代码生成完成后,会在此显示文件之间的 import / 组件依赖关系图',
+    graph_legend:'图例',
+    graph_selected:'选中节点',
+    tab_wiki:'工具 Wiki',
+    legend:'图例',
+    code_empty:'代码产物会在生成完成后显示',
+    download_btn:'下载 zip',
+    deps:'依赖',
+    settings_title:'设置',
+    ruidong_section:'睿动配置',
+    env_label:'环境', base_label:'Base URL', key_label:'API Key',
+    model_label:'默认模型',
+    model_hint:'模型选择保存在浏览器;改 URL / Key 需编辑 .env.dev 重启。',
+    theme_section:'主题', theme_light:'浅色', theme_dark:'深色', theme_auto:'跟随系统',
+    lang_section:'语言',
+    registry_section:'已注册能力(Registry · M2)',
+    wf_collect_hint:'L2 Receptionist',
+    wf_confirm_hint:'L3 MetaAgent · L4 Repair',
+    wf_generate_hint:'L5 Phase2 → Phase3',
+    wf_deliver_hint:'L6 Packager · zip',
+    state_collecting:'收集需求', state_clarifying:'澄清中', state_confirming:'等待确认',
+    state_generating:'生成中', state_delivered:'已交付',
+    confirm_prompt:'需求收集完毕 — 下方会显示需求摘要,确认后进入代码生成阶段(约 3-4 分钟)',
+    adjust_btn:'继续调整', confirm_btn:'✓ 确认生成',
+    send_btn:'发送', chat_placeholder:'继续对话 (Enter 发送,Shift+Enter 换行)',
+    step_plan:'L3 生成 UIBlueprint', step_phase2:'L5 生成 3 个原型变体', step_phase3:'L5 shadcn/ui 生产代码', step_completed:'打包交付',
+    waiting:'等待中', running:'进行中', done:'完成',
+  },
+  en: {
+    tagline:'Heterogeneous Agent Operations Runtime',
+    ready_badge:'L1—L6 Agent Ops runtime online',
+    hero_title:'One sentence, one deployable app.',
+    hero_sub:'Describe your product — the harness clarifies via dialog, then generates a full Vite + React + shadcn/ui project.',
+    sop_placeholder:'e.g. A team task board with a list homepage and filter-by-status',
+    start_btn:'Start dialog',
+    welcome_hint:'First configure Ruidong API Key & default model via the ⚙ gear on the top right.',
+    reset_btn:'Restart',
+    tab_trace:'Trace stream',
+    tab_code:'Code artifact',
+    tab_graph:'Knowledge Graph',
+    tab_wiki:'Capability Wiki',
+    graph_empty:'After generation, this tab shows file import / component dependency graph.',
+    graph_legend:'Legend',
+    graph_selected:'Selected node',
+    tab_wiki:'Tool Wiki',
+    legend:'Legend',
+    code_empty:'The code artifact will appear after generation.',
+    download_btn:'Download zip',
+    deps:'Deps',
+    settings_title:'Settings',
+    ruidong_section:'Ruidong',
+    env_label:'Environment', base_label:'Base URL', key_label:'API Key',
+    model_label:'Default model',
+    model_hint:'Model choice is saved in the browser; changing URL / Key requires editing .env.dev and restart.',
+    theme_section:'Theme', theme_light:'Light', theme_dark:'Dark', theme_auto:'System',
+    lang_section:'Language',
+    registry_section:'Registered capabilities (Registry · M2)',
+    wf_collect_hint:'L2 Receptionist',
+    wf_confirm_hint:'L3 MetaAgent · L4 Repair',
+    wf_generate_hint:'L5 Phase2 → Phase3',
+    wf_deliver_hint:'L6 Packager · zip',
+    state_collecting:'Collecting', state_clarifying:'Clarifying', state_confirming:'Awaiting confirm',
+    state_generating:'Generating', state_delivered:'Delivered',
+    confirm_prompt:'Requirements captured — a summary will appear below, confirm to start code generation (~3-4 min).',
+    adjust_btn:'Adjust more', confirm_btn:'✓ Confirm & generate',
+    send_btn:'Send', chat_placeholder:'Continue the conversation (Enter to send, Shift+Enter for newline)',
+    step_plan:'L3 build UIBlueprint', step_phase2:'L5 3 prototype variants', step_phase3:'L5 shadcn/ui production code', step_completed:'Package & deliver',
+    waiting:'Waiting', running:'Running', done:'Done',
+  }
+};
+
+const SAMPLE_SOPS = [
+  '做一个团队任务看板,首页显示任务列表',
+  '我要一个博客平台,首页 + 文章列表 + 详情页',
+  'HR 系统,员工列表 + 入职表单 + 请假审批',
+];
+
+// Aurora layer badge classes(CSS 已定义 .layer-badge-Lx / .layer-badge-sys)
+const LAYER_CLASS = {
+  L1:'layer-badge-L1', L2:'layer-badge-L2', L3:'layer-badge-L3',
+  L4:'layer-badge-L4', L5:'layer-badge-L5', L6:'layer-badge-L6',
+  sys:'layer-badge-sys',
+};
+
+// ============ Human-friendly trace translation ============
+// Key = `${layer}|${component}|${kind}` → { running?, text(ev, data) → string }
+// Icon 由 kind 类型推断:running / done / fail / neutral(不再用 emoji)
+const HUMAN_TRACE = {
+  'L1|LLMClient|request':  { running:true,  text: () => `正在询问大模型…` },
+  'L1|LLMClient|response': { text: (ev,d) => `模型返回 ${d.content_len||0} 字符 · 耗时 ${((d.elapsed_ms||0)/1000).toFixed(1)}s` },
+  'L1|LLMClient|error':    { text: ev => `请求失败:${(ev.message||'').slice(0,80)}` },
+
+  'L2|Receptionist|session_start': { text: () => `新对话开始` },
+  'L2|Receptionist|turn_start':    { text: ev => `接待员收到你的消息 · ${ev.message||''}` },
+  'L2|StateMachine|transition':    { text: ev => `对话状态变化:${ev.message||''}` },
+
+  'L3|MetaAgent|spec_fill':        { running:true, text: () => `正在把对话整理成结构化需求…` },
+  'L3|BlueprintPlanner|start':     { running:true, text: () => `正在规划界面蓝图(哪几页、什么组件)` },
+  'L3|BlueprintPlanner|done':      { text: ev => `界面蓝图完成 · ${ev.message||''}` },
+  'L3|DeliverPipeline|start':      { running:true, text: () => `生成流程启动` },
+  'L3|DeliverPipeline|completed':  { text: () => `所有阶段完成` },
+
+  'L4|Repair|start':     { text: ev => `稳定性内核启动 · ${ev.message||''}` },
+  'L4|Repair|attempt':   { running:true, text: ev => `校验模型输出 · ${ev.message||''}` },
+  'L4|Repair|retry':     { text: () => `校验失败,把错误喂回模型重试` },
+  'L4|Validator|ok':     { text: ev => `输出格式正确 · ${ev.message||''}` },
+  'L4|Validator|fail':   { text: ev => `格式不对,触发修复:${(ev.message||'').slice(0,60)}` },
+  'L4|Fallback|used':    { text: () => `模型多次失败,降级到兜底模板` },
+
+  'L5|UIPipeline|start':      { running:true, text: ev => `UI 生成管线启动 · ${ev.message||''}` },
+  'L5|UIPipeline|completed':  { text: () => `UI 生成完成` },
+  'L5|Phase2|start':          { running:true, text: () => `正在生成 3 个界面原型(约 2 分钟)` },
+  'L5|Phase2|done':           { text: ev => `3 个原型就绪 · ${ev.message||''}` },
+  'L5|Phase3|start':          { running:true, text: () => `正在生成 shadcn/ui 生产代码(约 1.5 分钟)` },
+  'L5|Phase3|done':           { text: ev => `代码文件就绪 · ${ev.message||''}` },
+
+  'L6|Packager|zipped': { text: ev => `项目打包完成 · ${ev.message||''}` },
+};
+
+const LAYER_TITLE = {
+  L1:'L1 · 模型', L2:'L2 · 对话', L3:'L3 · 编排',
+  L4:'L4 · 稳定性', L5:'L5 · 生成', L6:'L6 · 交付', sys:'系统',
+};
+
+function prettifyTrace(ev) {
+  const key = `${ev.layer}|${ev.component}|${ev.kind}`;
+  const spec = HUMAN_TRACE[key];
+  const human = spec ? spec.text(ev, ev.data || {}) : (ev.message || `${ev.component} ${ev.kind}`);
+  const running = !!(spec && spec.running);
+  let dotKind;
+  if (running) dotKind = 'running';
+  else if (/error|fail/i.test(ev.kind)) dotKind = 'fail';
+  else if (/done|ok|response|completed|zipped|used/i.test(ev.kind)) dotKind = 'done';
+  else dotKind = 'neutral';
+  return { dotKind, running, human };
+}
+
+/* ============ helpers ============ */
+const $  = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+const show = id => {
+  $$('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + id));
+  renderWorkflow();
+};
+
+/* ============ state ============ */
+const STATE = {
+  lang: localStorage.getItem('ah.lang') || 'zh',
+  theme: localStorage.getItem('ah.theme') || 'auto',
+  selectedModel: localStorage.getItem('ah.model') || '',
+  tab: 'trace',
+  cfg: null,
+  sessionId: null,
+  messages: [],
+  dialogState: 'collecting',
+  pending: false,
+  phases: [],
+  phaseMessages: {},
+  phaseTimings: {},
+  artifact: null,
+  prototypes: null,
+  graph: null,        // CodeGraph payload (Batch C+++)
+  _cyInstance: null,  // Cytoscape instance reference
+  wikiEntries: [],          // RegistryEntry[] (Batch Y)
+  wikiStats: null,          // {atom, composite, agent, preset}
+  wikiKindFilter: 'all',    // 'all' | 'atom' | 'composite' | 'agent' | 'preset'
+  wikiQuery: '',
+  wikiSelectedId: null,
+  _wikiLoaded: false,
+  pipelineTimer: null,
+  pipelineStart: 0,
+  traceAbort: null,
+};
+
+const t = k => (I18N[STATE.lang] && I18N[STATE.lang][k]) || I18N.zh[k] || k;
+
+function applyI18n() {
+  $$('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+  $$('[data-i18n-placeholder]').forEach(el => el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder'))));
+  document.documentElement.setAttribute('lang', STATE.lang === 'zh' ? 'zh-CN' : 'en');
+}
+function applyTheme() {
+  const isDark = STATE.theme === 'dark' || (STATE.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.classList.toggle('dark', isDark);
+  $$('.theme-btn').forEach(b => b.classList.toggle('border-primary-500', b.dataset.theme === STATE.theme));
+  $$('.lang-btn').forEach(b => b.classList.toggle('border-primary-500', b.dataset.lang === STATE.lang));
+}
+function showError(msg) { $('#error-msg').textContent = '⚠ ' + msg; $('#error-bar').classList.remove('hidden'); }
+function clearError() { $('#error-bar').classList.add('hidden'); }
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const p = n => String(n).padStart(2,'0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+
+/* ============ API ============ */
+async function apiJSON(path, method='GET', body) {
+  const r = await fetch(path, {
+    method, headers: body ? {'Content-Type':'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = r.headers.get('content-type') || '';
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`${method} ${path} → ${r.status} ${txt.slice(0,200)}`);
+  }
+  return ct.includes('json') ? r.json() : r.text();
+}
+async function* sseStream(path, body) {
+  const r = await fetch(path, {
+    method:'POST', headers:{'Content-Type':'application/json','Accept':'text/event-stream'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error(`${path} → ${r.status} ${t.slice(0,200)}`); }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  const FRAME_RE = /\r?\n\r?\n/;
+  const LINE_RE = /\r?\n/;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream:true });
+    // SSE frames are separated by blank line (\r\n\r\n or \n\n depending on server)
+    const parts = buf.split(FRAME_RE);
+    buf = parts.pop() || '';
+    for (const frame of parts) {
+      if (!frame) continue;
+      let eventName = null, data = null;
+      for (const line of frame.split(LINE_RE)) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) data = line.slice(5).trim();
+      }
+      if (data) yield { event: eventName, data };
+    }
+  }
+}
+
+/* ============ Trace stream ============ */
+async function connectTrace() {
+  try {
+    const r = await fetch('/api/trace/stream', { headers:{'Accept':'text/event-stream'} });
+    if (!r.ok) throw new Error('trace stream not ready');
+    $('#trace-status').textContent = '● live'; $('#trace-status').className = 'text-xs text-emerald-500';
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const FRAME_RE = /\r?\n\r?\n/;
+    const LINE_RE = /\r?\n/;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const parts = buf.split(FRAME_RE); buf = parts.pop() || '';
+      for (const frame of parts) {
+        if (!frame) continue;
+        const dataLine = frame.split(LINE_RE).find(l => l.startsWith('data:'));
+        if (!dataLine) continue;
+        try {
+          const ev = JSON.parse(dataLine.slice(5).trim());
+          appendTrace(ev);
+        } catch {}
+      }
+    }
+    $('#trace-status').textContent = '○ closed'; $('#trace-status').className = 'text-xs text-slate-400';
+  } catch (e) {
+    $('#trace-status').textContent = '○ offline'; $('#trace-status').className = 'text-xs text-slate-400';
+    setTimeout(connectTrace, 3000);
+  }
+}
+
+function appendTrace(ev) {
+  const list = $('#trace-list');
+  const layer = ev.layer || 'sys';
+  const badgeClass = LAYER_CLASS[layer] || LAYER_CLASS.sys;
+  const p = prettifyTrace(ev);
+
+  // If this is a "done/ok/response" event, try to "close" the previous running line
+  if (/response|done|ok|completed|zipped/.test(ev.kind)) {
+    for (let i = list.children.length - 1; i >= Math.max(0, list.children.length - 10); i--) {
+      const prev = list.children[i];
+      if (prev.dataset && prev.dataset.runningKey && prev.dataset.runningLayer === layer) {
+        const dotEl = prev.querySelector('.trace-dot');
+        if (dotEl) {
+          dotEl.classList.remove('trace-dot-running');
+          dotEl.classList.add('trace-dot-done');
+        }
+        prev.classList.add('trace-resolved');
+        delete prev.dataset.runningKey;
+        break;
+      }
+    }
+  }
+
+  const el = document.createElement('div');
+  el.className = 'trace-line';
+  el.setAttribute('data-layer', layer);
+  if (p.running) {
+    el.dataset.runningKey = `${ev.component}|${ev.kind}`;
+    el.dataset.runningLayer = layer;
+  }
+  el.innerHTML = `
+    <div class="flex items-start gap-2.5">
+      <span class="trace-dot trace-dot-${p.dotKind}" aria-hidden="true"></span>
+      <div class="flex-1 min-w-0">
+        <div class="trace-human">${escapeHtml(p.human)}</div>
+        <div class="trace-meta">
+          <span class="tabular-nums">${fmtTime(ev.ts)}</span>
+          <span class="inline-flex items-center justify-center min-w-[22px] h-[15px] px-1 rounded text-[10px] font-bold ${badgeClass}">${layer}</span>
+          <span class="opacity-80">${escapeHtml(ev.component)}.<span style="opacity:.7">${escapeHtml(ev.kind)}</span></span>
+        </div>
+      </div>
+    </div>`;
+  list.appendChild(el);
+  while (list.children.length > 300) list.removeChild(list.firstChild);
+  list.scrollTop = list.scrollHeight;
+  updatePipelineStepsFromTrace(ev);
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function clearTrace() { $('#trace-list').innerHTML = ''; }
+
+/* ============ Workflow stepper ============ */
+function currentWorkflowStep() {
+  if ($('#screen-welcome').classList.contains('active')) return null;
+  if (STATE.artifact)                       return 'deliver';
+  if (STATE.pipelineTimer || STATE.phases.length) return 'generate';
+  if (STATE.dialogState === 'confirming')   return 'confirm';
+  return 'collect';
+}
+function renderWorkflow() {
+  const active = currentWorkflowStep();
+  const order = ['collect','confirm','generate','deliver'];
+  const activeIdx = order.indexOf(active);
+  document.querySelectorAll('.wf-step').forEach(el => {
+    const step = el.dataset.step, idx = order.indexOf(step);
+    const dot = el.querySelector('.wf-dot'), label = el.querySelector('.wf-label');
+    el.classList.remove('wf-current');
+    el.removeAttribute('data-done');
+    const done = activeIdx >= 0 && idx < activeIdx;
+    const current = step === active;
+    dot.className = 'wf-dot w-8 h-8 rounded-full grid place-items-center text-[11px] shrink-0';
+    label.className = 'wf-label truncate';
+    if (current) {
+      el.classList.add('wf-current');
+      dot.textContent = String(idx + 1);
+    } else if (done) {
+      el.setAttribute('data-done', '1');
+      dot.textContent = '✓';
+    } else {
+      dot.style.background = 'var(--bg-subtle)';
+      dot.style.color = 'var(--text-muted)';
+      dot.textContent = String(idx + 1);
+    }
+  });
+}
+
+/* ============ Welcome ============ */
+function renderSamples() {
+  const box = $('#samples'); box.innerHTML = '';
+  for (const s of SAMPLE_SOPS) {
+    const b = document.createElement('button');
+    b.className = 'text-xs text-slate-500 hover:text-primary-700 bg-slate-100 hover:bg-primary-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-primary-700/30 px-2 py-1 rounded-md transition-colors';
+    b.textContent = s.length > 22 ? s.slice(0,20) + '…' : s;
+    b.title = s;
+    b.onclick = () => { $('#sop-input').value = s; };
+    box.appendChild(b);
+  }
+}
+
+/* ============ Chat ============ */
+function renderAssistantMarkdown(text) {
+  // escape HTML first, then apply a tiny subset of markdown
+  let html = escapeHtml(text);
+  // **bold** → <strong>
+  html = html.replace(/\*\*([^*\n]+?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+  // bullet lines "- xxx" → • xxx (keep indent)
+  html = html.replace(/(^|\n)- /g, '$1<span class="text-primary-600 dark:text-primary-300">•</span> ');
+  return html;
+}
+
+function renderMessages(streamBuf) {
+  const mc = $('#messages'); mc.innerHTML = '';
+  for (const m of STATE.messages) {
+    if (m.role === 'system_meta') {
+      mc.appendChild(renderSystemMeta(m));
+      continue;
+    }
+    const row = document.createElement('div');
+    row.className = 'msg-enter flex ' + (m.role === 'user' ? 'justify-end' : 'justify-start');
+    const bubble = document.createElement('div');
+    bubble.className = 'max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ' + (
+      m.role === 'user'
+        ? 'bg-primary-600 text-white'
+        : 'bg-slate-50 text-slate-800 dark:bg-slate-800/80 dark:text-slate-100 border border-slate-200 dark:border-slate-700');
+    if (m.role === 'assistant') { bubble.innerHTML = renderAssistantMarkdown(m.content); }
+    else { bubble.textContent = m.content; }
+    row.appendChild(bubble); mc.appendChild(row);
+  }
+  if (streamBuf) {
+    const row = document.createElement('div');
+    row.className = 'msg-enter flex justify-start';
+    const bubble = document.createElement('div');
+    bubble.className = 'max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap bg-slate-50 text-slate-800 dark:bg-slate-800/80 dark:text-slate-100 border border-slate-200 dark:border-slate-700';
+    bubble.innerHTML = renderAssistantMarkdown(streamBuf) + ' <span class="text-primary-600 dark:text-primary-300">▍</span>';
+    row.appendChild(bubble); mc.appendChild(row);
+  }
+  mc.scrollTop = mc.scrollHeight;
+}
+
+const TRIAGE_LABELS = {
+  receptionist:    { zh: '接待员', en: 'Receptionist',     icon: '💬' },
+  intent_router:   { zh: '工作流规划', en: 'Planner',       icon: '📋' },
+  generated_agent: { zh: '召唤已有 Agent', en: 'Generated Agent', icon: '⭐' },
+  help:            { zh: '平台帮助', en: 'Help',            icon: '❓' },
+};
+
+function renderSystemMeta(m) {
+  // Returns a centered DOM row for one system_meta item
+  const wrap = document.createElement('div');
+  wrap.className = 'flex justify-center my-1.5';
+  const inner = document.createElement('div');
+  inner.className = 'flex flex-col items-center gap-1 max-w-[88%]';
+  wrap.appendChild(inner);
+
+  const lang = (typeof STATE !== 'undefined' && STATE.lang) ? STATE.lang : 'zh';
+
+  if (m.kind === 'triage') {
+    const d = m.data || {};
+    const target = d.target || 'receptionist';
+    const meta = TRIAGE_LABELS[target] || TRIAGE_LABELS.receptionist;
+    const label = meta[lang] || meta.zh;
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `triage-chip triage-chip-${target}` + (d.fallback_used ? ' triage-chip-fallback' : '');
+    chip.title = (lang === 'en'
+      ? `Triage routed to ${target}${d.target_id ? ' · ' + d.target_id : ''} — click for reason`
+      : `Triage 路由到 ${label}${d.target_id ? ' · ' + d.target_id : ''} — 点击查看理由`);
+    chip.innerHTML = `
+      <span class="triage-chip-dot"></span>
+      <span>${meta.icon} ${escapeHtml(label)}</span>
+      ${d.target_id ? `<span style="opacity:.7;font-family:ui-monospace,Menlo,monospace;font-size:10px">${escapeHtml(d.target_id)}</span>` : ''}
+      ${d.fallback_used ? `<span style="opacity:.7;font-size:10px">· fallback</span>` : ''}
+    `;
+    inner.appendChild(chip);
+
+    const detail = document.createElement('div');
+    detail.className = 'triage-detail';
+    detail.style.display = 'none';
+    detail.innerHTML = `
+      <div><b>${lang === 'en' ? 'Reason' : '理由'}:</b> ${escapeHtml(d.reason || '')}</div>
+      ${d.target_id ? `<div><b>target_id:</b> ${escapeHtml(d.target_id)}</div>` : ''}
+    `;
+    inner.appendChild(detail);
+    chip.addEventListener('click', () => {
+      detail.style.display = (detail.style.display === 'none') ? 'block' : 'none';
+    });
+    return wrap;
+  }
+
+  if (m.kind === 'agent_invoked') {
+    const d = m.data || {};
+    const ok = !d.error;
+    const chip = document.createElement('div');
+    chip.className = 'triage-chip triage-chip-generated_agent';
+    chip.innerHTML = `
+      <span class="triage-chip-dot"></span>
+      <span>${ok ? '✓' : '⚠'} ${escapeHtml(d.agent_id || '?')}</span>
+      <span style="opacity:.7;font-size:10px">${(d.elapsed_ms || 0)}ms${d.used_mock ? ' · mock' : ''}</span>
+    `;
+    inner.appendChild(chip);
+    return wrap;
+  }
+
+  if (m.kind === 'workflow_planned') {
+    const d = m.data || {};
+    const chip = document.createElement('div');
+    chip.className = 'triage-chip triage-chip-intent_router';
+    chip.innerHTML = `
+      <span class="triage-chip-dot"></span>
+      <span>📋 WorkflowSpec</span>
+      <span style="opacity:.7;font-size:10px">${d.step_count || 0} steps · ${d.spec_valid ? 'valid' : 'invalid'}</span>
+    `;
+    inner.appendChild(chip);
+    return wrap;
+  }
+
+  // Unknown kind — render as a tiny grey hint
+  const fallback = document.createElement('div');
+  fallback.className = 'triage-chip triage-chip-help';
+  fallback.textContent = m.kind || 'meta';
+  inner.appendChild(fallback);
+  return wrap;
+}
+
+function renderStateBadge() {
+  $('#state-badge').textContent = t('state_' + STATE.dialogState);
+  $('#session-label').textContent = STATE.sessionId ? 'session: ' + STATE.sessionId.slice(0, 8) : '';
+  renderNextHint();
+  renderWorkflow();
+}
+
+function renderNextHint() {
+  const hint = $('#next-hint'), txt = $('#next-hint-text'); if (!hint) return;
+  const s = STATE.dialogState;
+  const user_turns = STATE.messages.filter(m => m.role === 'user').length;
+  const msgs = {
+    zh: {
+      collecting: `接待员会按【已理解 / 还想了解 / 下一步】三段反馈。回答问题 2-3 轮自动进入确认,或输入 "差不多了" 主动推进。(已 ${user_turns} 轮)`,
+      clarifying: `继续补充细节,或输入 "差不多了" 跳过澄清直接生成摘要。(已 ${user_turns} 轮)`,
+      confirming: t('confirm_prompt'),
+      generating: `正在生成代码…右侧 Trace 流实时显示每一层在做什么(L1 LLM / L2 对话 / L3 编排 / L4 稳定性 / L5 管线 / L6 交付)`,
+      delivered:  `已完成交付。右侧切到 "代码产物" 可查看文件树并下载 zip`,
+    },
+    en: {
+      collecting: `The receptionist replies in 3 sections: Understood / Need / Next. After 2-3 turns you auto-reach Confirm, or type "I'm ready" to proceed. (${user_turns} turn(s))`,
+      clarifying: `Add more detail, or type "I'm ready" to skip clarification. (${user_turns} turn(s))`,
+      confirming: t('confirm_prompt'),
+      generating: `Generating code… the Trace panel on the right shows every layer at work (L1-L6)`,
+      delivered:  `Delivered. Switch to "Code artifact" on the right to browse files & download.`,
+    }
+  };
+  txt.textContent = (msgs[STATE.lang] || msgs.zh)[s] || '';
+  hint.className = (s === 'confirming' || s === 'delivered')
+    ? 'mx-4 mt-3 bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-300 dark:border-emerald-700/50 text-emerald-900 dark:text-emerald-100 rounded-lg px-3 py-2 text-xs flex items-start gap-2 flex-none'
+    : 'mx-4 mt-3 bg-primary-50 dark:bg-primary-700/15 border border-primary-200 dark:border-primary-700/40 text-primary-900 dark:text-primary-100 rounded-lg px-3 py-2 text-xs flex items-start gap-2 flex-none';
+}
+
+function renderChatBar() {
+  const bar = $('#chat-bar');
+  if (STATE.dialogState === 'confirming') {
+    bar.innerHTML = `
+      <div class="flex gap-2">
+        <button id="btn-adjust" class="flex-1 h-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">${t('adjust_btn')}</button>
+        <button id="btn-confirm" ${STATE.pending?'disabled':''} class="flex-1 h-10 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium disabled:opacity-50">${STATE.pending ? '…' : t('confirm_btn')}</button>
+      </div>`;
+    on($('#btn-adjust'), 'click', () => sendTurn('还需要调整一下'));
+    on($('#btn-confirm'), 'click', onConfirmGenerate);
+  } else if (STATE.dialogState === 'generating' || STATE.dialogState === 'delivered') {
+    bar.innerHTML = `<div class="text-center text-xs text-slate-400 py-1.5">${STATE.dialogState === 'generating' ? t('state_generating') : t('state_delivered')}</div>`;
+  } else {
+    bar.innerHTML = `
+      <div class="flex items-end gap-2">
+        <textarea id="turn-input" rows="2" placeholder="${t('chat_placeholder')}"
+          class="flex-1 resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"></textarea>
+        <button id="btn-send" ${STATE.pending?'disabled':''} class="h-10 px-4 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium disabled:opacity-50">${STATE.pending ? '…' : t('send_btn')}</button>
+      </div>`;
+    const ta = $('#turn-input');
+    on($('#btn-send'), 'click', () => { const v = ta.value.trim(); if(v){ ta.value=''; sendTurn(v); }});
+    on(ta, 'keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const v = ta.value.trim(); if(v){ ta.value=''; sendTurn(v); }}
+    });
+  }
+}
+
+async function onStart() {
+  const sop = $('#sop-input').value.trim(); if (!sop) return;
+  clearError();
+  STATE.pending = true;
+  try {
+    const r = await apiJSON('/api/sessions', 'POST', { sop });
+    STATE.sessionId = r.session_id;
+    STATE.dialogState = r.state;
+    STATE.messages = [{ role:'user', content: sop }];
+    show('workspace'); setTab('trace');
+    renderStateBadge(); renderChatBar(); renderMessages('');
+    await sendTurn(sop, /*isInitial*/true);
+  } catch (e) { showError(e.message); }
+  STATE.pending = false;
+}
+
+async function sendTurn(msg, isInitial=false) {
+  if (!isInitial) STATE.messages.push({ role:'user', content: msg });
+  STATE.pending = true;
+  renderStateBadge(); renderChatBar(); renderMessages('');
+
+  let assistantText = '';
+  try {
+    for await (const frame of sseStream(`/api/sessions/${STATE.sessionId}/turn`, { message: msg })) {
+      try {
+        const ev = JSON.parse(frame.data);
+        if (ev.type === 'state') { STATE.dialogState = ev.value; renderStateBadge(); }
+        else if (ev.type === 'token') { assistantText += ev.value; renderMessages(assistantText); }
+        else if (ev.type === 'triage_decision') {
+          // Batch J — render Triage routing as a centered chip in the chat stream
+          STATE.messages.push({ role:'system_meta', kind:'triage', data: ev.data });
+          renderMessages(assistantText);
+        }
+        else if (ev.type === 'agent_invoked') {
+          STATE.messages.push({ role:'system_meta', kind:'agent_invoked', data: ev.data });
+        }
+        else if (ev.type === 'workflow_planned') {
+          STATE.messages.push({ role:'system_meta', kind:'workflow_planned', data: ev.data });
+        }
+        else if (ev.type === 'turn_end') { /* finalize */ }
+      } catch {}
+    }
+    if (assistantText) STATE.messages.push({ role:'assistant', content: assistantText });
+  } catch (e) {
+    showError(e.message);
+    STATE.messages.push({ role:'assistant', content: '⚠ ' + e.message });
+  }
+  STATE.pending = false;
+  renderStateBadge(); renderChatBar(); renderMessages('');
+}
+
+/* ============ Pipeline steps (right-panel footer) ============ */
+const PIPELINE_STEPS = [
+  { key:'plan',      label_key:'step_plan' },
+  { key:'phase2',    label_key:'step_phase2' },
+  { key:'phase3',    label_key:'step_phase3' },
+  { key:'completed', label_key:'step_completed' },
+];
+function renderPipelineSteps() {
+  const panel = $('#pipeline-steps'); const ol = $('#pipeline-step-list');
+  ol.innerHTML = '';
+  const activeIdx = STATE.phases.length;
+  PIPELINE_STEPS.forEach((s, i) => {
+    const done = STATE.phases.includes(s.key);
+    const active = !done && i === activeIdx;
+    const pending = !done && !active;
+    let icon;
+    if (done) icon = `<div class="w-5 h-5 rounded-full bg-emerald-500 text-white grid place-items-center text-[10px]">✓</div>`;
+    else if (active) icon = `<div class="w-5 h-5 rounded-full bg-primary-600 text-white grid place-items-center"><div class="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full spin"></div></div>`;
+    else icon = `<div class="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-400 grid place-items-center text-[10px]">${i+1}</div>`;
+    const startT = STATE.phaseTimings[s.key + '_start'];
+    const endT   = STATE.phaseTimings[s.key + '_end'];
+    const elapsed = endT && startT ? fmtElapsed(endT - startT)
+      : (active && startT) ? fmtElapsed(Date.now() - startT) : '';
+    const msg = STATE.phaseMessages[s.key] || '';
+    const li = document.createElement('li');
+    li.className = 'flex items-start gap-2 text-xs';
+    li.innerHTML = `
+      ${icon}
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="font-medium ${pending?'text-slate-400 dark:text-slate-500':''}">${t(s.label_key)}</span>
+          ${done ? `<span class="text-[10px] text-emerald-600 dark:text-emerald-400">${t('done')} · ${elapsed}</span>` : ''}
+          ${active ? `<span class="text-[10px] text-primary-600 dark:text-primary-300">${t('running')} · ${elapsed}</span>` : ''}
+          ${pending ? `<span class="text-[10px] text-slate-400">${t('waiting')}</span>` : ''}
+        </div>
+        ${msg ? `<p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">${escapeHtml(msg)}</p>` : ''}
+      </div>`;
+    ol.appendChild(li);
+  });
+  panel.classList.toggle('hidden', STATE.phases.length === 0 && !STATE.pipelineTimer);
+}
+
+function updatePipelineStepsFromTrace(ev) {
+  // Drive the pipeline footer from L5 trace events as an extra visual cue
+  if (ev.layer !== 'L5') return;
+  if (ev.component === 'Phase2' && ev.kind === 'start') { STATE.phaseTimings.phase2_start = Date.now(); }
+  if (ev.component === 'Phase2' && ev.kind === 'done') {
+    STATE.phaseTimings.phase2_end = Date.now();
+    if (!STATE.phases.includes('phase2')) STATE.phases.push('phase2');
+    STATE.phaseMessages.phase2 = ev.message;
+  }
+  if (ev.component === 'Phase3' && ev.kind === 'start') { STATE.phaseTimings.phase3_start = Date.now(); }
+  if (ev.component === 'Phase3' && ev.kind === 'done') {
+    STATE.phaseTimings.phase3_end = Date.now();
+    if (!STATE.phases.includes('phase3')) STATE.phases.push('phase3');
+    STATE.phaseMessages.phase3 = ev.message;
+  }
+  if (ev.component === 'UIPipeline' && ev.kind === 'completed') {
+    if (!STATE.phases.includes('completed')) STATE.phases.push('completed');
+    STATE.phaseMessages.completed = ev.message;
+  }
+  renderPipelineSteps();
+}
+
+async function onConfirmGenerate() {
+  if (!STATE.sessionId || STATE.pending) return;
+  clearError();
+  STATE.pending = true; STATE.dialogState = 'generating';
+  try {
+    STATE.phases = []; STATE.phaseMessages = {}; STATE.phaseTimings = {};
+    STATE.pipelineStart = Date.now();
+    STATE.pipelineTimer = setInterval(() => renderPipelineSteps(), 500);
+    renderStateBadge(); renderChatBar(); renderPipelineSteps();
+    setTab('trace');
+
+    // 统一的后端 deliver 管线 SSE: plan_start → plan_done → phase2 → phase3 → completed
+    for await (const frame of sseStream(`/api/sessions/${STATE.sessionId}/deliver`, {
+      model: STATE.selectedModel,
+    })) {
+      const stage = frame.event; let payload; try { payload = JSON.parse(frame.data); } catch {}
+      if (!stage || !payload) continue;
+
+      const now = Date.now();
+      if (stage === 'plan_start') {
+        STATE.phaseTimings.plan_start = now;
+        STATE.phaseMessages.plan = payload.message || '';
+      } else if (stage === 'plan_done') {
+        STATE.phaseTimings.plan_end = now;
+        if (!STATE.phases.includes('plan')) STATE.phases.push('plan');
+        STATE.phaseMessages.plan = payload.message || '';
+      } else if (stage === 'completed' && payload.data) {
+        STATE.artifact = payload.data.code || null;
+        STATE.prototypes = payload.data.prototypes || null;
+      }
+      renderPipelineSteps();
+    }
+
+    clearInterval(STATE.pipelineTimer); STATE.pipelineTimer = null;
+    if (!STATE.artifact) throw new Error('生成未返回 CodeArtifact');
+    STATE.dialogState = 'delivered';
+    renderDelivered();
+    setTab('code');
+  } catch (e) {
+    clearInterval(STATE.pipelineTimer); STATE.pipelineTimer = null;
+    showError(e.message);
+    STATE.dialogState = 'clarifying';
+  }
+  STATE.pending = false;
+  renderStateBadge(); renderChatBar();
+}
+
+/* ============ Wiki shelf (Batch Y · three-tier registry) ============ */
+const KIND_META = {
+  all:       { label: '全部', color: 'var(--accent)',      layer: null },
+  atom:      { label: '原子',  color: 'var(--l1)', layer: 'L1' },
+  composite: { label: '组合',  color: 'var(--l3)', layer: 'L3' },
+  agent:     { label: '智能体', color: 'var(--l5)', layer: 'L5' },
+  preset:    { label: '预设',  color: 'var(--l6)', layer: 'L6' },
+};
+
+async function loadWikiShelf() {
+  try {
+    const [stats, all] = await Promise.all([
+      apiJSON('/api/wiki/stats'),
+      apiJSON('/api/wiki/all?activation_status=active'),
+    ]);
+    STATE.wikiStats = stats;
+    STATE.wikiEntries = all.entries || [];
+    const total = (stats.atom||0) + (stats.composite||0) + (stats.agent||0) + (stats.preset||0);
+    $('#tab-wiki-badge').textContent = String(total);
+    $('#wiki-tier-stats').innerHTML = [
+      `atom <b>${stats.atom||0}</b>`,
+      `composite <b>${stats.composite||0}</b>`,
+      `agent <b>${stats.agent||0}</b>`,
+      `preset <b>${stats.preset||0}</b>`,
+    ].join(' · ');
+    renderWikiKinds();
+    renderWikiShelfList();
+  } catch (e) {
+    showError('Wiki 加载失败: ' + e.message);
+  }
+}
+
+function renderWikiKinds() {
+  const bar = $('#wiki-kinds'); bar.innerHTML = '';
+  const current = STATE.wikiKindFilter || 'all';
+  for (const k of ['all','atom','composite','agent','preset']) {
+    const meta = KIND_META[k];
+    const n = k === 'all'
+      ? (STATE.wikiStats ? (STATE.wikiStats.atom||0)+(STATE.wikiStats.composite||0)+(STATE.wikiStats.agent||0)+(STATE.wikiStats.preset||0) : '—')
+      : (STATE.wikiStats?.[k] ?? '—');
+    const btn = document.createElement('button');
+    const active = current === k;
+    btn.className = 'kind-chip h-7 px-2.5 rounded-md text-[11px] transition-all flex items-center gap-1.5';
+    btn.style.cssText = active
+      ? `background:${meta.color};color:white;font-family:var(--font-display);font-weight:var(--w-bold);border:1px solid ${meta.color};box-shadow:0 2px 8px ${meta.color}44`
+      : `background:var(--bg-elev);color:var(--text-secondary);border:1px solid var(--border);font-family:var(--font-display);font-weight:var(--w-bold)`;
+    btn.innerHTML = `${meta.layer ? `<span style="opacity:.75;font-family:var(--font-mono);font-size:9px">${meta.layer}</span>` : ''}<span>${meta.label}</span><span style="font-family:var(--font-mono);opacity:.7">${n}</span>`;
+    btn.onclick = () => { STATE.wikiKindFilter = k; renderWikiKinds(); renderWikiShelfList(); };
+    bar.appendChild(btn);
+  }
+}
+
+function renderWikiShelfList() {
+  const list = $('#wiki-list'); list.innerHTML = '';
+  const kindFilter = STATE.wikiKindFilter || 'all';
+  const q = (STATE.wikiQuery || '').trim().toLowerCase();
+  let entries = STATE.wikiEntries || [];
+  if (kindFilter !== 'all') entries = entries.filter(e => e.kind === kindFilter);
+  if (q) {
+    entries = entries.filter(e => {
+      const hay = [e.id, e.name, e.description, (e.tags||[]).join(' '), (e.intent_keywords||[]).join(' ')].join(' ').toLowerCase();
+      return hay.includes(q) || q.split(/\s+/).every(t => t && hay.includes(t));
+    });
+  }
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="col-span-full text-center text-xs py-8" style="color:var(--text-muted);font-family:var(--font-body);font-weight:var(--w-thin)">没有匹配的能力</div>`;
+    return;
+  }
+  for (const [i, e] of entries.entries()) {
+    const meta = KIND_META[e.kind] || KIND_META.all;
+    const card = document.createElement('button');
+    card.className = 'wiki-card fade-in text-left p-3 rounded-lg transition-all';
+    card.style.animationDelay = `${Math.min(i, 8) * 40}ms`;
+    card.style.cssText += `background:var(--bg-panel);border:1px solid var(--border);color:var(--text)`;
+    const selected = STATE.wikiSelectedId === `${e.kind}:${e.id}`;
+    if (selected) card.style.boxShadow = `0 0 0 1.5px ${meta.color}, 0 4px 18px rgba(0,0,0,0.08)`;
+    card.innerHTML = `
+      <div class="flex items-center gap-2 mb-1.5">
+        <span style="background:${meta.color}22;color:${meta.color};border:1px solid ${meta.color}55;font-family:var(--font-display);font-weight:var(--w-bold);font-size:9px;letter-spacing:0.05em;padding:2px 6px;border-radius:4px;text-transform:uppercase">${e.kind}</span>
+        ${e.is_generated ? `<span style="background:var(--warning)22;color:var(--warning);font-size:9px;padding:2px 5px;border-radius:4px;font-family:var(--font-mono)">GENERATED</span>` : ''}
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">v${escapeHtml(e.version)}</span>
+      </div>
+      <div style="font-family:var(--font-display);font-weight:var(--w-bold);font-size:13px;letter-spacing:-0.01em;color:var(--text);margin-bottom:3px">${escapeHtml(e.name)}</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:6px">${escapeHtml(e.id)}</div>
+      <div style="font-family:var(--font-body);font-weight:var(--w-thin);font-size:11.5px;line-height:1.55;color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml((e.description||'').split('\n')[0].slice(0, 180))}</div>
+      ${(e.intent_keywords||[]).length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:3px">${(e.intent_keywords||[]).slice(0,4).map(k => `<span style="background:var(--bg-elev);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--font-mono)">${escapeHtml(k)}</span>`).join('')}</div>` : ''}
+    `;
+    card.onclick = () => openWikiDetail(e.kind, e.id);
+    list.appendChild(card);
+  }
+}
+
+async function openWikiDetail(kind, id) {
+  STATE.wikiSelectedId = `${kind}:${id}`;
+  renderWikiShelfList();
+  $('#wiki-detail-body').innerHTML = '<div class="text-xs" style="color:var(--text-muted)">加载中…</div>';
+  $('#wiki-detail-source').textContent = '';
+  try {
+    const data = await apiJSON(`/api/wiki/${kind}/${encodeURIComponent(id)}/markdown`);
+    $('#wiki-detail-source').textContent = data.source === 'curated' ? '📝 curated README' : '⚙ auto-generated';
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+      $('#wiki-detail-body').innerHTML = marked.parse(data.markdown || '');
+    } else {
+      $('#wiki-detail-body').innerHTML = `<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11px">${escapeHtml(data.markdown || '')}</pre>`;
+    }
+  } catch (e) {
+    $('#wiki-detail-body').innerHTML = `<div class="text-xs text-amber-600">加载失败: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+/* ============ Code Graph (Batch C+++) ============ */
+const NODE_COLORS = {
+  file: '#5e81ac',
+  component: '#a3be8c',
+  external: '#b48ead',
+  function: '#ebcb8b',
+  directory: '#88c0d0',
+};
+
+async function loadGraph() {
+  if (!STATE.artifact) return;
+  try {
+    const data = await apiJSON('/api/graph/parse', 'POST', { artifact: STATE.artifact });
+    STATE.graph = data;
+    $('#tab-graph-badge').classList.remove('hidden');
+    $('#tab-graph-badge').textContent = `${(data.nodes||[]).length}`;
+    renderGraph(data);
+  } catch (e) {
+    showError('代码图谱解析失败: ' + e.message);
+  }
+}
+
+function renderGraph(graph) {
+  if (typeof cytoscape === 'undefined') {
+    setTimeout(() => renderGraph(graph), 200);
+    return;
+  }
+  $('#graph-empty').classList.add('hidden');
+  $('#graph-view').classList.remove('hidden');
+  $('#graph-view').classList.add('flex');
+
+  const stats = graph.stats || {};
+  $('#graph-stats').innerHTML = [
+    `<span><b>${stats['node:file']||0}</b> 文件</span>`,
+    `<span><b>${stats['node:component']||0}</b> 组件</span>`,
+    `<span><b>${stats['node:external']||0}</b> 外部包</span>`,
+    `<span><b>${stats['edge:imports']||0}</b> imports</span>`,
+  ].join(' · ');
+
+  const elements = [
+    ...graph.nodes.map(n => ({ data: { id: n.id, label: n.label, type: n.type, raw: n } })),
+    ...graph.edges.map(e => ({ data: { id: e.id, source: e.source, target: e.target, type: e.type } })),
+  ];
+
+  if (typeof cytoscape.use === 'function' && typeof cytoscapeDagre === 'function' && !cytoscape._dagreRegistered) {
+    cytoscape.use(cytoscapeDagre);
+    cytoscape._dagreRegistered = true;
+  }
+
+  if (STATE._cyInstance) STATE._cyInstance.destroy();
+
+  const cy = cytoscape({
+    container: $('#cy'),
+    elements,
+    style: [
+      { selector: 'node', style: {
+        'background-color': ele => NODE_COLORS[ele.data('type')] || '#7b8a9e',
+        'label': 'data(label)',
+        'color': 'var(--text)',
+        'font-size': '11px',
+        'text-valign': 'bottom',
+        'text-margin-y': 5,
+        'text-outline-width': 2,
+        'text-outline-color': 'var(--bg-elev)',
+        'width': ele => ele.data('type') === 'file' ? 36 : 24,
+        'height': ele => ele.data('type') === 'file' ? 36 : 24,
+        'border-width': 2,
+        'border-color': 'rgba(255,255,255,0.6)',
+      }},
+      { selector: 'node:selected', style: {
+        'border-color': '#88c0d0', 'border-width': 4,
+      }},
+      { selector: 'edge', style: {
+        'width': 1.4,
+        'line-color': 'rgba(94,129,172,0.45)',
+        'target-arrow-color': 'rgba(94,129,172,0.7)',
+        'target-arrow-shape': 'triangle',
+        'arrow-scale': 0.8,
+        'curve-style': 'bezier',
+      }},
+      { selector: 'edge[type = "contains"]', style: {
+        'line-style': 'dashed',
+        'line-color': 'rgba(163,190,140,0.55)',
+      }},
+      { selector: 'edge.highlighted', style: {
+        'line-color': '#bf616a', 'target-arrow-color': '#bf616a', 'width': 2.4, 'z-index': 99,
+      }},
+    ],
+    layout: layoutFor($('#graph-layout').value || 'dagre'),
+  });
+
+  cy.on('tap', 'node', evt => {
+    const n = evt.target.data('raw');
+    const incomers = evt.target.incomers('edge');
+    const outgoers = evt.target.outgoers('edge');
+    cy.elements('edge').removeClass('highlighted');
+    incomers.addClass('highlighted');
+    outgoers.addClass('highlighted');
+    const inN = incomers.length, outN = outgoers.length;
+    $('#graph-detail').innerHTML = `
+      <div class="font-mono text-[11px] mb-1.5" style="color:var(--text)">${escapeHtml(n.label)}</div>
+      <div class="text-[10px]" style="color:var(--text-muted)">type: <b>${escapeHtml(n.type)}</b></div>
+      ${n.file_path ? `<div class="text-[10px] truncate mt-0.5" style="color:var(--text-muted)" title="${escapeHtml(n.file_path)}">${escapeHtml(n.file_path)}</div>` : ''}
+      <div class="text-[10px] mt-2" style="color:var(--text-muted)">↓ imports: <b>${outN}</b></div>
+      <div class="text-[10px]" style="color:var(--text-muted)">↑ used by: <b>${inN}</b></div>
+      ${(n.metadata && n.metadata.loc) ? `<div class="text-[10px] mt-2" style="color:var(--text-muted)">LOC: ${n.metadata.loc}</div>` : ''}
+    `;
+    // If file node clicked, also jump to file preview in Code tab
+    if (n.type === 'file' && STATE.artifact) {
+      const idx = STATE.artifact.files.findIndex(f => f.path === n.file_path);
+      if (idx >= 0) showFilePreview(idx);
+    }
+  });
+
+  cy.on('tap', evt => {
+    if (evt.target === cy) {
+      cy.elements('edge').removeClass('highlighted');
+    }
+  });
+
+  STATE._cyInstance = cy;
+}
+
+function layoutFor(name) {
+  if (name === 'dagre') {
+    return { name: 'dagre', rankDir: 'LR', nodeSep: 30, rankSep: 60, padding: 24 };
+  }
+  if (name === 'cose') {
+    return { name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 80, padding: 24 };
+  }
+  if (name === 'breadthfirst') {
+    return { name: 'breadthfirst', directed: true, padding: 24, spacingFactor: 1.2 };
+  }
+  return { name: name || 'circle', padding: 24 };
+}
+
+/* ============ Code panel ============ */
+function renderDelivered() {
+  const a = STATE.artifact;
+  $('#code-empty').classList.add('hidden');
+  $('#code-view').classList.remove('hidden');
+  $('#code-view').classList.add('flex');
+  $('#artifact-summary').textContent = `${a.files.length} files · entry ${a.entrypoint} · ${Object.keys(a.dependencies||{}).length} deps`;
+  $('#tab-code-badge').classList.remove('hidden'); $('#tab-code-badge').textContent = a.files.length;
+
+  const fl = $('#file-list'); fl.innerHTML = '';
+  a.files.forEach((f, i) => {
+    const d = document.createElement('div');
+    d.className = 'file-row truncate px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300';
+    d.dataset.idx = i; d.textContent = f.path; d.title = f.path;
+    d.onclick = () => showFilePreview(i);
+    fl.appendChild(d);
+  });
+
+  const dl = $('#deps-list'); dl.innerHTML = '';
+  Object.entries(a.dependencies || {}).forEach(([k,v]) => {
+    const d = document.createElement('div');
+    d.className = 'truncate';
+    d.innerHTML = `<span class="text-primary-700 dark:text-primary-300">${escapeHtml(k)}</span>: ${escapeHtml(v)}`;
+    d.title = `${k}: ${v}`;
+    dl.appendChild(d);
+  });
+
+  const entryIdx = a.files.findIndex(f => f.path === a.entrypoint);
+  showFilePreview(entryIdx >= 0 ? entryIdx : 0);
+}
+
+function showFilePreview(idx) {
+  const f = STATE.artifact?.files[idx]; if (!f) return;
+  $('#preview-filename').textContent = f.path;
+  $('#preview-meta').textContent = `${f.content.length.toLocaleString()} chars`;
+  $('#file-preview').textContent = f.content;
+  $$('.file-row').forEach(el => el.classList.toggle('bg-primary-50', Number(el.dataset.idx) === idx));
+  $$('.file-row').forEach(el => el.classList.toggle('dark:bg-primary-700/20', Number(el.dataset.idx) === idx));
+}
+
+async function onDownload() {
+  if (!STATE.artifact) return;
+  try {
+    const r = await fetch('/api/delivery/download', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ artifact: STATE.artifact, project_name: 'generated-app' }),
+    });
+    if (!r.ok) throw new Error(`download → ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'generated-app.zip'; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { showError(e.message); }
+}
+
+/* ============ Tabs ============ */
+function setTab(name) {
+  STATE.tab = name;
+  $$('.tab-btn').forEach(b => {
+    const active = b.dataset.tab === name;
+    b.className = 'tab-btn h-8 px-3 rounded-md flex items-center gap-1.5 text-xs font-medium ' + (
+      active
+        ? 'bg-primary-50 text-primary-700 dark:bg-primary-700/20 dark:text-primary-200'
+        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800');
+  });
+  for (const tab of ['trace','code','wiki','graph']) {
+    const el = $('#tab-panel-' + tab);
+    if (!el) continue;
+    el.classList.toggle('hidden', name !== tab);
+    el.classList.toggle('flex', name === tab);
+  }
+  if (name === 'graph' && STATE.artifact && !STATE.graph) {
+    loadGraph();
+  } else if (name === 'graph' && STATE.graph && !STATE._cyInstance) {
+    // re-render if user navigates back
+    renderGraph(STATE.graph);
+  }
+  if (name === 'wiki' && !STATE._wikiLoaded) {
+    STATE._wikiLoaded = true;
+    loadWikiShelf();
+  }
+  if (name === 'wiki' && !STATE.wikiLoaded) { loadWiki(); }
+}
+
+/* ============ Wiki tab ============ */
+STATE.wikiTools = [];
+STATE.wikiCategoryFilter = '';
+STATE.wikiLoaded = false;
+
+const CATEGORY_LABEL = {
+  ocr:'OCR', speech_tts:'TTS', speech_asr:'ASR', vision:'视觉',
+  image_generation:'图像生成', web_scrape:'网页抓取', web_search:'搜索',
+  rag:'RAG', report_analysis:'报告分析', translation:'翻译',
+  data_transform:'数据变换', database:'数据库', notification:'通知',
+  calendar:'日历', crm:'CRM', custom:'自定义',
+};
+
+async function loadWiki() {
+  try {
+    const data = await apiJSON('/api/wiki/tools?activation_status=active');
+    STATE.wikiTools = data.tools || [];
+    STATE.wikiLoaded = true;
+    $('#tab-wiki-badge').textContent = String(STATE.wikiTools.length);
+    $('#tab-wiki-badge').classList.remove('hidden');
+    renderWikiChips();
+    renderWikiList();
+  } catch (e) {
+    $('#wiki-list').innerHTML = `<div class="text-xs text-amber-600 p-4">Wiki 加载失败:${escapeHtml(String(e.message))}</div>`;
+  }
+}
+
+function renderWikiChips() {
+  const box = $('#wiki-cat-chips'); if (!box) return;
+  box.innerHTML = '';
+  const cats = {};
+  for (const t of STATE.wikiTools) cats[t.category] = (cats[t.category]||0)+1;
+  const chips = [['', '全部', STATE.wikiTools.length]];
+  for (const [k,n] of Object.entries(cats).sort()) chips.push([k, CATEGORY_LABEL[k]||k, n]);
+  for (const [key, label, count] of chips) {
+    const active = key === STATE.wikiCategoryFilter;
+    const chip = document.createElement('button');
+    chip.className = 'h-7 px-2.5 rounded-full text-[11px] border transition-colors';
+    if (active) {
+      chip.style.background = 'var(--accent)'; chip.style.color = '#fff';
+      chip.style.borderColor = 'var(--accent)';
+    } else {
+      chip.style.borderColor = 'var(--border)'; chip.style.color = 'var(--text-secondary)';
+    }
+    chip.textContent = `${label} · ${count}`;
+    chip.onclick = () => { STATE.wikiCategoryFilter = key; renderWikiChips(); renderWikiList(); };
+    box.appendChild(chip);
+  }
+}
+
+function renderWikiList() {
+  const list = $('#wiki-list'); if (!list) return;
+  list.innerHTML = '';
+  const q = ($('#wiki-search')?.value || '').trim().toLowerCase();
+  const cat = STATE.wikiCategoryFilter;
+  const shown = STATE.wikiTools.filter(t => {
+    if (cat && t.category !== cat) return false;
+    if (!q) return true;
+    const hay = [t.tool_id, t.name, t.description, t.provider, (t.tags||[]).join(' ')].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  if (shown.length === 0) {
+    list.innerHTML = `<div class="text-xs p-4" style="color:var(--text-muted)">没有匹配的工具</div>`;
+    return;
+  }
+  for (const t of shown) {
+    const card = document.createElement('div');
+    card.className = 'border rounded-xl p-3 transition-shadow';
+    card.style.background = 'var(--bg-panel)'; card.style.borderColor = 'var(--border)';
+    const costTxt = t.cost_per_call == null ? '—' : `$${Number(t.cost_per_call).toFixed(3)}/call`;
+    const latency = t.expected_latency_ms == null ? '—' : `${Math.round(t.expected_latency_ms/100)/10}s`;
+    const catLabel = CATEGORY_LABEL[t.category] || t.category;
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-[13px]">${escapeHtml(t.name)}</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded" style="background:rgba(136,192,208,0.16);color:var(--accent)">${escapeHtml(catLabel)}</span>
+          </div>
+          <div class="text-[10px] font-mono mt-0.5" style="color:var(--text-muted)">${escapeHtml(t.tool_id)} · v${escapeHtml(t.version)}</div>
+        </div>
+        <span class="text-[10px] px-1.5 py-0.5 rounded" style="background:rgba(180,142,173,0.15);color:#8a5890">${escapeHtml(t.provider)}</span>
+      </div>
+      <div class="text-[11px] mt-2 leading-snug" style="color:var(--text-secondary)">${escapeHtml((t.description||'').split('\n')[0].slice(0,140))}</div>
+      <div class="flex items-center gap-3 mt-2 text-[10px]" style="color:var(--text-muted)">
+        <span>💰 ${costTxt}</span>
+        <span>⏱ ${latency}</span>
+        <span>🚚 ${escapeHtml(t.transport_type)}</span>
+        ${t.docs_url ? `<a href="${escapeHtml(t.docs_url)}" target="_blank" rel="noopener" class="hover:underline" style="color:var(--accent)">docs ↗</a>` : ''}
+      </div>
+      ${(t.tags||[]).length ? `<div class="mt-2 flex gap-1 flex-wrap">${(t.tags||[]).slice(0,6).map(tg => `<span class="text-[9px] px-1.5 py-0.5 rounded" style="background:var(--bg-elev);color:var(--text-muted)">${escapeHtml(tg)}</span>`).join('')}</div>` : ''}`;
+    list.appendChild(card);
+  }
+}
+
+/* ============ Reset ============ */
+function onReset() {
+  if (STATE.pipelineTimer) clearInterval(STATE.pipelineTimer);
+  Object.assign(STATE, {
+    sessionId: null, messages: [], dialogState: 'collecting', pending: false,
+    phases: [], phaseMessages: {}, phaseTimings: {}, artifact: null, prototypes: null,
+    pipelineTimer: null,
+  });
+  $('#tab-code-badge').classList.add('hidden');
+  $('#code-view').classList.add('hidden'); $('#code-view').classList.remove('flex');
+  $('#code-empty').classList.remove('hidden');
+  show('welcome'); clearError();
+}
+
+async function loadRegistry() {
+  const list = $('#registry-list'); if (!list) return;
+  try {
+    const data = await apiJSON('/api/registry/capabilities?activation_status=active');
+    $('#registry-count').textContent = `${data.total} active`;
+    list.innerHTML = '';
+    for (const c of (data.capabilities || [])) {
+      const card = document.createElement('div');
+      card.className = 'border border-slate-200 dark:border-slate-700 rounded-lg p-2.5';
+      const costTxt = c.cost_budget == null ? '—' : `$${Number(c.cost_budget).toFixed(2)}`;
+      const latencyTxt = c.latency_budget_ms == null ? '—' : `${Math.round(c.latency_budget_ms/1000)}s`;
+      card.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-mono text-[11px] font-semibold" style="color:var(--accent)">${escapeHtml(c.capability_id)}</span>
+          <span class="font-mono text-[10px]" style="color:var(--text-muted)">v${escapeHtml(c.version)}</span>
+        </div>
+        <div class="mt-1" style="color:var(--text-secondary)">${escapeHtml(c.name || '')}</div>
+        <div class="mt-1.5 flex items-center gap-2 text-[10px]" style="color:var(--text-muted)">
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style="background:rgba(94,129,172,0.12)">risk:${escapeHtml(c.risk_level)}</span>
+          <span>💰 ${costTxt}</span>
+          <span>⏱ ${latencyTxt}</span>
+          <span>${(c.eval_suite_ids||[]).length} evals</span>
+        </div>`;
+      list.appendChild(card);
+    }
+    if (!data.capabilities || data.capabilities.length === 0) {
+      list.innerHTML = '<div class="text-[11px] text-slate-400">未注册能力(capabilities/ YAML 为空?)</div>';
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="text-[11px] text-amber-600">加载失败:${escapeHtml(String(e.message))}</div>`;
+  }
+}
+
+/* ============ Config & settings ============ */
+async function loadConfig() {
+  try {
+    const cfg = await apiJSON('/api/config');
+    STATE.cfg = cfg;
+    $('#cfg-env').textContent = cfg.env;
+    $('#cfg-base').textContent = cfg.sandbox_api_base || '(unset)';
+    $('#cfg-key').textContent = cfg.api_key_configured ? cfg.api_key_masked : '(unset)';
+    $('#badge-env').textContent = 'env: ' + cfg.env;
+    const sel = $('#cfg-model'); sel.innerHTML = '';
+    const models = cfg.chat_models || [];
+    if (!cfg.api_key_configured) { sel.innerHTML = '<option>— 未配置 API Key —</option>'; sel.disabled = true; }
+    else if (models.length === 0) { sel.innerHTML = '<option>— 获取模型失败 —</option>'; sel.disabled = true; }
+    else {
+      sel.disabled = false;
+      if (!STATE.selectedModel || !models.includes(STATE.selectedModel)) {
+        STATE.selectedModel = cfg.default_model && models.includes(cfg.default_model) ? cfg.default_model : models[0];
+        localStorage.setItem('ah.model', STATE.selectedModel);
+      }
+      for (const m of models) {
+        const o = document.createElement('option'); o.value = m; o.textContent = m;
+        if (m === STATE.selectedModel) o.selected = true;
+        sel.appendChild(o);
+      }
+      $('#badge-model').textContent = STATE.selectedModel;
+      $('#badge-model').classList.remove('hidden');
+    }
+    const hb = $('#badge-health');
+    hb.textContent = '● online';
+    hb.className = 'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+  } catch (e) {
+    showError('加载配置失败: ' + e.message);
+  }
+}
+function openDrawer() { $('#drawer').classList.add('open'); $('#drawer-mask').classList.remove('hidden'); }
+function closeDrawer(){ $('#drawer').classList.remove('open'); $('#drawer-mask').classList.add('hidden'); }
+
+/* ============ Boot ============ */
+function wireUp() {
+  on($('#wiki-search'), 'input', () => renderWikiList());
+  on($('#wiki-query'), 'input', e => { STATE.wikiQuery = e.target.value; renderWikiShelfList(); });
+  on($('#btn-start'), 'click', onStart);
+  on($('#btn-reset'), 'click', onReset);
+  on($('#btn-download'), 'click', onDownload);
+  on($('#btn-settings'), 'click', openDrawer);
+  on($('#btn-close-drawer'), 'click', closeDrawer);
+  on($('#drawer-mask'), 'click', closeDrawer);
+  on($('#error-close'), 'click', clearError);
+  on($('#btn-trace-clear'), 'click', clearTrace);
+  on($('#btn-graph-refresh'), 'click', () => { STATE.graph = null; if (STATE._cyInstance) { STATE._cyInstance.destroy(); STATE._cyInstance = null; } loadGraph(); });
+  on($('#graph-layout'), 'change', () => { if (STATE.graph) renderGraph(STATE.graph); });
+  $$('.tab-btn').forEach(b => on(b, 'click', () => setTab(b.dataset.tab)));
+  on($('#cfg-model'), 'change', e => {
+    STATE.selectedModel = e.target.value;
+    localStorage.setItem('ah.model', STATE.selectedModel);
+    $('#badge-model').textContent = STATE.selectedModel;
+    $('#badge-model').classList.remove('hidden');
+  });
+  $$('.theme-btn').forEach(b => on(b, 'click', () => {
+    STATE.theme = b.dataset.theme; localStorage.setItem('ah.theme', STATE.theme); applyTheme();
+  }));
+  $$('.lang-btn').forEach(b => on(b, 'click', () => {
+    STATE.lang = b.dataset.lang; localStorage.setItem('ah.lang', STATE.lang);
+    applyI18n(); renderSamples(); renderChatBar(); renderStateBadge(); applyTheme();
+  }));
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (STATE.theme === 'auto') applyTheme();
+  });
+}
+async function boot() {
+  applyI18n(); applyTheme(); wireUp(); renderSamples(); renderWorkflow(); setTab('trace');
+  await loadConfig();
+  loadRegistry();     // load capability registry into settings drawer
+  connectTrace();     // 启动 trace 订阅(持续重连)
+}
+boot();
+</script>
+</body>
+</html>

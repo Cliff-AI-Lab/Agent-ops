@@ -1,0 +1,12 @@
+{
+  "common.save": "保存",
+  "common.cancel": "取消",
+  "common.confirm": "确认",
+  "common.loading": "加载中…",
+  "common.empty": "暂无数据",
+  "common.retry": "重试",
+  "common.back": "返回",
+  "common.next": "下一步",
+  "common.search": "搜索",
+  "common.settings": "设置"
+}

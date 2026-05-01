@@ -1,0 +1,29 @@
+capability_id: code_graph.parse
+version: 0.1.0
+name: Parse CodeArtifact into a knowledge graph
+description: |
+  L6 deterministic parser. Extracts file/component/external nodes and
+  imports/contains edges from a CodeArtifact's TS/TSX/JS files via regex.
+  Pure function — no LLM, no side effects, idempotent.
+
+  Post-delivery audit step: shows how generated files relate to each other
+  (blueprint §6 Observability + §17 Replay artifact graph).
+
+  Future Workflow Engine (Batch D) will register this capability as a
+  step in `workflows/ui_delivery.yaml` after `delivery.package_zip`.
+owner: agent-ops-platform
+input_schema_ref: ontology:CodeArtifact
+output_schema_ref: ontology:CodeGraph
+allowed_tools: []
+forbidden_actions:
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.00
+latency_budget_ms: 2000
+quality_checks:
+  - all-files-parsed
+  - no-orphan-edges
+fallback_capabilities: []
+eval_suite_ids: []
+activation_status: active

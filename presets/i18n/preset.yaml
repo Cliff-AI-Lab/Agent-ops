@@ -1,0 +1,36 @@
+bundle_id: i18n
+version: 0.1.0
+name: I18n + Language Switcher
+description: |
+  Lightweight i18n provider with a 中/EN toggle button. Stores the user's
+  locale preference in localStorage (keyed by product name to avoid collisions
+  across multiple Agent Ops generated apps on the same origin). Wraps the app
+  with <I18nProvider> and renders <LanguageSwitcher /> in the settings area.
+framework: react-vite
+auto_inject: true
+applies_to: [app, dashboard, page, component]
+provides_features: [i18n, language-switch]
+files:
+  - path: src/lib/i18n.tsx
+    template_path: template/src/lib/i18n.tsx.j2
+    is_template: true
+  - path: src/components/LanguageSwitcher.tsx
+    template_path: template/src/components/LanguageSwitcher.tsx.j2
+    is_template: true
+  - path: src/locales/zh.json
+    template_path: template/src/locales/zh.json
+    is_template: false
+  - path: src/locales/en.json
+    template_path: template/src/locales/en.json
+    is_template: false
+required_deps: {}
+required_dev_deps: {}
+entry_injections:
+  - file: src/App.tsx
+    import_lines:
+      - 'import { I18nProvider } from "./lib/i18n";'
+      - 'import { LanguageSwitcher } from "./components/LanguageSwitcher";'
+    provider_open: '<I18nProvider>'
+    provider_close: '</I18nProvider>'
+    body_inject: '<LanguageSwitcher />'
+activation_status: active

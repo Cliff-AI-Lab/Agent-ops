@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets (never commit)
+.env
+.env.dev
+.env.sandbox
+.env.prod
+.env.local
+!.env.example
+
+# Runtime data (per zip-distribution README convention)
+harness.db
+*.db-journal
+assets/
+agents/__generated__/
+
+# Build artifacts
+build/
+dist/
+*.zip
+!presets/**/*.zip
+!tests/fixtures/**/*.zip
+
+# Node (frontend if any)
+node_modules/
+
+# Logs
+*.log
+logs/

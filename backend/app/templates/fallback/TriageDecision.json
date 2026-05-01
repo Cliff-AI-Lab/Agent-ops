@@ -1,0 +1,6 @@
+{
+  "target": "receptionist",
+  "target_id": null,
+  "reason": "Fallback: Triage LLM exhausted retries; defaulting to receptionist for safety.",
+  "forwarded_message": "请详细描述你想做的产品或工具,我帮你梳理需求。"
+}

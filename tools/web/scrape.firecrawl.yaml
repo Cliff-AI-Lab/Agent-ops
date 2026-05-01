@@ -1,0 +1,37 @@
+tool_id: web.scrape.firecrawl
+version: 0.1.0
+name: Firecrawl 网页抓取
+description: |
+  把任意 URL 抓下来并转成干净的 Markdown(去广告、去导航、保留正文)。
+  支持渲染 JavaScript。适合用于 RAG 数据源、实时查询、监控舆情。
+provider: Firecrawl
+category: web_scrape
+tags: [markdown, javascript, rag-source]
+input_schema:
+  type: object
+  required: [url]
+  properties:
+    url: { type: string, format: uri }
+    wait_for_selector: { type: string, description: "等待渲染的 CSS 选择器" }
+    include_html: { type: boolean, default: false }
+    screenshot: { type: boolean, default: false }
+output_schema:
+  type: object
+  properties:
+    markdown: { type: string }
+    metadata: { type: object }
+    screenshot_url: { type: string }
+transport_type: http
+endpoint: https://api.firecrawl.dev/v1/scrape
+auth_mode: bearer
+auth_env_vars: [FIRECRAWL_API_KEY]
+pricing_model: per_call
+cost_per_call: 0.001
+rate_limit_per_minute: 120
+expected_latency_ms: 3500
+docs_url: https://docs.firecrawl.dev/features/scrape
+examples:
+  - title: 抓取一篇博客文章转 Markdown
+    input: { url: "https://example.com/post/123" }
+    output_hint: markdown 字段含正文
+activation_status: active

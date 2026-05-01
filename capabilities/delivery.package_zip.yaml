@@ -1,0 +1,25 @@
+capability_id: delivery.package_zip
+version: 0.1.0
+name: Package CodeArtifact into deployable zip
+description: |
+  L6 Packager. Takes a validated CodeArtifact and produces a ready-to-run
+  Vite + React project zip. Auto-injects README.md, .env.example with Ruidong
+  placeholders, and .gitignore when missing. Merges dependencies into
+  package.json. Category: export — Batch G will require approval for irreversible
+  variants (direct sandbox deployment).
+owner: raytone-ui
+input_schema_ref: ontology:CodeArtifact
+output_schema_ref: ontology:ZipPackageArtifact
+allowed_tools: []
+forbidden_actions:
+  - network_egress
+  - irreversible
+risk_level: low
+cost_budget: 0.00
+latency_budget_ms: 3000
+quality_checks:
+  - zip-magic-bytes
+  - all-files-present
+fallback_capabilities: []
+eval_suite_ids: []
+activation_status: active

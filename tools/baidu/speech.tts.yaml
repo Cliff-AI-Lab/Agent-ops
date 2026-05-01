@@ -1,0 +1,41 @@
+tool_id: baidu.speech.tts
+version: 0.1.0
+name: 百度语音合成 TTS(精品音库)
+description: |
+  百度语音合成 REST API。把文字转成自然人声 WAV/MP3。支持多种音色、语速、
+  音量调节。最长 60 秒 / 单次。
+provider: Baidu AI
+category: speech_tts
+tags: [mandarin, english, voice, expressive]
+input_schema:
+  type: object
+  required: [text]
+  properties:
+    text: { type: string, maxLength: 1024 }
+    voice:
+      type: string
+      enum: [zh_female_1, zh_male_1, zh_male_premium, en_female_1]
+      default: zh_female_1
+    speed: { type: integer, minimum: 0, maximum: 15, default: 5 }
+    pitch: { type: integer, minimum: 0, maximum: 15, default: 5 }
+    volume: { type: integer, minimum: 0, maximum: 15, default: 5 }
+    format: { type: string, enum: [mp3, wav, pcm], default: mp3 }
+output_schema:
+  type: object
+  properties:
+    audio_base64: { type: string }
+    duration_ms: { type: integer }
+transport_type: http
+endpoint: https://tsn.baidu.com/text2audio
+auth_mode: api_key
+auth_env_vars: [BAIDU_TTS_API_KEY, BAIDU_TTS_SECRET_KEY]
+pricing_model: per_call
+cost_per_call: 0.003
+rate_limit_per_minute: 60
+expected_latency_ms: 800
+docs_url: https://cloud.baidu.com/doc/SPEECH/s/mlbxh7xie
+examples:
+  - title: 朗读新闻段落
+    input: { text: "各位听众早上好。", voice: "zh_female_1", speed: 5 }
+    output_hint: 返回 base64 MP3 音频约 2 秒
+activation_status: active
