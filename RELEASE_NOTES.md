@@ -1,5 +1,52 @@
 # Agent Ops — Release Notes
 
+## V2.0.3 — 2026-05-01 晚 · Phase 5 提前到达（Multi-Target Hybrid）
+
+> 状态：N8nCompiler 就绪 + Pipeline 多目标输出 + 真 LLM 跑通 hybrid 双产物。**349 测试通过 + 1 skipped**。
+
+### 新功能
+
+- **N8nCompilerImpl**（pure-template，无 LLM）
+  - ResolvedDAG → n8n workflow JSON（n8n ≥ 1.0 schema）
+  - subcategory → n8n-nodes-base.* 类型映射（Schedule/DB/HTTP/LLM/Notify）
+  - hybrid 模式 scoping 到 target_split.n8n_nodes
+  - LLM 节点带 `${RUIDONG_MODEL_FOR_<task>_<size>}` 占位符
+- **Pipeline 多 target 编译**
+  - hybrid 模式 → 同时产 Dify YAML + n8n JSON
+  - `result["outputs"]: {dify, n8n}` 字典；`result["dsl"]` 保留为主输出（向后兼容）
+- **CLI factory 显示双输出**
+  - `outputs: dify=Nc, n8n=Mc` 行
+  - per-target 验证结果分行显示
+
+### 真 LLM 验证
+
+```
+$ uv run factory build "每周一上午9点查询销售数据库 sales_db, 写中文周报推钉钉"
+
+target:  hybrid
+nodes:   3 / edges: 2
+outputs: dify=992c, n8n=1493c
+valid:   ok
+  dify : ok (err=0, info=0)
+  n8n  : ok (err=0, info=1)
+```
+
+### 用户指示对齐
+
+> "不考虑沙箱，看能否跑通流程，沙箱作为一个路线" — 2026-05-01 晚
+
+工厂引擎现在不依赖任何外部沙箱即可端到端跑通。Dify/n8n 沙箱导入验证作为独立路线，不阻塞工厂演进。
+
+### 已知局限不变
+
+- DifyCompiler 仍输出 "Dify-shaped" YAML（结构对、字段近似）
+- 沙箱实际导入验证待团队接入
+- harvest CLI 待 V2.0.4 起补
+- Phase 3 World 前端 scaffold 待整合到 v1.9
+- Phase 4 评测集仍为 ES-001 (10 用例)，扩到 30 用例待 V2.0.4
+
+---
+
 ## V2.0.2 — 2026-05-01 · Phase 2 收尾包（6 Gate 状态机 + HTTP API + SSE）
 
 > 状态：Phase 2 W4+W5 完成。**343 测试通过 + 1 skipped**。

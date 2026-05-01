@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.2"
-description = "Agent Ops V2.0.2 — Phase 2: 6 Gate state machine + HTTP /api/factory/* + SSE canvas events + DB persistence."
+version = "2.0.3"
+description = "Agent Ops V2.0.3 — Phase 5 early: N8nCompilerImpl + multi-target Pipeline (hybrid emits both Dify YAML + n8n JSON in one build)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
