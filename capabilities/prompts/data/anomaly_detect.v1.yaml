@@ -1,0 +1,66 @@
+asset_id: prompt.data.anomaly_detect.v1
+display_id: PR-002
+type: prompt
+schema_version: "1.0"
+version: "1.0.0"
+
+name: "数据异常/变化点识别"
+description: 给定一份结构化数据，识别异常值和变化最显著的维度，按业务影响排序
+tags: [data, anomaly, analysis, insight]
+
+linked_task_type: "结构化抽取"
+linked_size: "中"
+
+inputs:
+  - name: data
+    type: tabular_data
+    description: 结构化数据（list of dicts 或 JSON）
+  - name: top_n
+    type: integer
+    required: false
+    description: 返回前 N 个异常项，默认 5
+
+output:
+  format: json_object
+  schema_hint:
+    anomalies: list
+    summary: string
+
+template: |
+  你是一个数据分析师。下面是一份结构化数据，请识别其中**最值得关注的异常或变化点**，
+  从业务影响维度排序，最多返回 {{top_n | default(5)}} 条。
+
+  返回严格 JSON：
+  {
+    "anomalies": [
+      {
+        "metric": "<维度名>",
+        "value": "<具体值>",
+        "kind": "spike | drop | outlier | new",
+        "severity": "high | medium | low",
+        "business_implication": "<一句话业务含义>"
+      }
+    ],
+    "summary": "<整体一句话评估>"
+  }
+
+  要点：
+  - 不要逐条罗列所有数据，**只要异常点**
+  - severity 高的放前面
+  - business_implication 要说"对运营/销售/客户的具体影响"，不是技术描述
+
+  数据：
+  {{data}}
+
+test_cases:
+  - name: sales-spike
+    inputs:
+      data: '[{"customer":"A","gmv":100},{"customer":"B","gmv":5000},{"customer":"C","gmv":120}]'
+      top_n: 3
+    expected_categories: [anomalies, summary]
+
+maintainer: "tests / 2026-05"
+provenance:
+  built_at: "2026-05-01"
+  built_by: manual
+  license: "MIT"

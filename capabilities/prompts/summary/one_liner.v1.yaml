@@ -1,0 +1,50 @@
+asset_id: prompt.summary.one_liner.v1
+display_id: PR-004
+type: prompt
+schema_version: "1.0"
+version: "1.0.0"
+
+name: "一句话标题摘要"
+description: 把长报告/正文压缩成一句话推送标题，≤30 字，突出关键变化
+tags: [summary, headline, push, short]
+
+linked_task_type: "轻量判别"
+linked_size: "小"
+
+inputs:
+  - name: content
+    type: natural_language
+    description: 原始长内容
+  - name: max_chars
+    type: integer
+    required: false
+    description: 最大字数，默认 30
+
+output:
+  format: text
+
+template: |
+  从下面的长内容里提炼**一句话标题**，用于推送通知（钉钉/飞书）。
+
+  铁律：
+  - **不超过 {{max_chars | default(30)}} 个汉字**（含标点）
+  - 必须包含**关键数字**或**关键变化**
+  - 不要"关于…的报告"这种废话开头
+  - 中文，不要英文夹杂
+  - 直接输出标题，不要"标题：" 前缀
+
+  原文：
+  {{content}}
+
+test_cases:
+  - name: sales-spike-headline
+    inputs:
+      content: "本周 GMV 1,500,000 元，超目标 25%，主要来自客户 B 单笔大单 5,000,000。建议跟进类似客户。"
+      max_chars: 30
+    expected_min_chars: 10
+
+maintainer: "tests / 2026-05"
+provenance:
+  built_at: "2026-05-01"
+  built_by: manual
+  license: "MIT"

@@ -1,0 +1,76 @@
+asset_id: prompt.report.zh_writer.v1
+display_id: PR-003
+type: prompt
+schema_version: "1.0"
+version: "1.0.0"
+
+name: "中文商业报告撰写"
+description: 用规范中文商业语言写日报/周报/月报，固定结构（摘要/亮点/数据/建议），含 markdown 表格
+tags: [report, chinese, business, writing]
+
+linked_task_type: "长文档分块总结"
+linked_size: "中"
+
+inputs:
+  - name: data
+    type: tabular_data
+    description: 原始数据
+  - name: insights
+    type: json_object
+    description: 异常分析结果（来自 anomaly_detect）
+  - name: period
+    type: string
+    description: 报告周期（"上周" / "本月" / 等）
+  - name: max_chars
+    type: integer
+    required: false
+    description: 最大字数，默认 1500
+
+output:
+  format: markdown_text
+
+template: |
+  你是一名专业商业分析师。请基于下面的数据和分析结果，
+  撰写一份**{{period}}**的中文商业简报，最多 {{max_chars | default(1500)}} 字。
+
+  必须包含 4 个章节：
+
+  ## 一、{{period}}摘要
+  3-5 句话概述整体表现。
+
+  ## 二、关键变化与亮点
+  列举 anomalies 里 severity=high 的项，每条说明业务含义。
+
+  ## 三、数据表
+  把核心指标用 **markdown 表格**呈现（| 表头 | ... |）。
+  表格不超过 10 行 × 5 列。
+
+  ## 四、行动建议
+  3 条具体建议，每条说明"做什么 / 谁做 / 期望结果"。
+
+  铁律：
+  - 中文，不要英文夹杂
+  - 数字保留 2 位小数
+  - 不要写"经过分析发现"这种空话
+  - 不要发明数据外的"洞见"
+
+  原始数据：
+  {{data}}
+
+  分析结果：
+  {{insights}}
+
+test_cases:
+  - name: weekly-sales
+    inputs:
+      data: '[{"week":"2026-W17","gmv":1500000}]'
+      insights: '{"anomalies":[{"metric":"gmv","value":1500000,"severity":"high","business_implication":"本周 GMV 超目标 25%"}],"summary":"业绩强势"}'
+      period: 上周
+    expected_categories: [markdown]
+    expected_contains: ["## 一", "## 二", "## 三", "## 四"]
+
+maintainer: "tests / 2026-05"
+provenance:
+  built_at: "2026-05-01"
+  built_by: manual
+  license: "MIT"

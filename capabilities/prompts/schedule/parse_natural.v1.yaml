@@ -1,0 +1,65 @@
+asset_id: prompt.schedule.parse_natural.v1
+display_id: PR-005
+type: prompt
+schema_version: "1.0"
+version: "1.0.0"
+
+name: "自然语言时间 → cron 表达式"
+description: 把"每周一上午9点"等自然语言时间表达解析为标准 5 字段 cron 表达式
+tags: [schedule, cron, parse, time]
+
+linked_task_type: "结构化抽取"
+linked_size: "小"
+
+inputs:
+  - name: natural_time
+    type: string
+    description: 自然语言时间（"每周一上午9点" / "每月最后一个工作日下午 5:30" 等）
+
+output:
+  format: json_object
+  schema_hint:
+    cron_expr: string
+    timezone: string
+    confidence: number
+
+template: |
+  把下面的自然语言时间表达解析为**标准 5 字段 cron 表达式**（minute hour day-of-month month day-of-week），
+  返回严格 JSON：
+
+  {
+    "cron_expr": "<5 字段 cron, 如 '0 9 * * 1'>",
+    "timezone": "Asia/Shanghai",
+    "confidence": 0.0-1.0,
+    "interpretation": "<一句话回译，确认理解>"
+  }
+
+  cron 字段约定：
+  - 周一=1 周日=0（标准 cron）
+  - 月份 1-12，日 1-31
+  - 用 `*` 表示任意
+
+  铁律：
+  - 不要返回 6 字段 cron（不带秒）
+  - 模糊表达（如"每天早上"）按"早上 9 点"解析，confidence 标 ≤0.7
+  - 无法解析的，cron_expr 设为 null，confidence=0，interpretation 说明原因
+
+  自然语言时间：
+  {{natural_time}}
+
+test_cases:
+  - name: every-monday-9am
+    inputs:
+      natural_time: "每周一上午 9 点"
+    expected_categories: [cron_expr]
+    expected_contains: ["0 9", "1"]
+  - name: monthly-last-friday
+    inputs:
+      natural_time: "每月最后一个工作日下午 5:30"
+    expected_categories: [cron_expr, confidence]
+
+maintainer: "tests / 2026-05"
+provenance:
+  built_at: "2026-05-01"
+  built_by: manual
+  license: "MIT"

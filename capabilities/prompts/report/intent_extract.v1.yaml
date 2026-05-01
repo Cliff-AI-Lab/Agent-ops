@@ -1,0 +1,57 @@
+asset_id: prompt.report.intent_extract.v1
+display_id: PR-001
+type: prompt
+schema_version: "1.0"
+version: "1.0.0"
+
+name: "需求意图抽取"
+description: 把自然语言报表需求拆解为结构化要素（数据源 / 筛选 / 分析维度 / 推送渠道 / 触发时间）
+tags: [intent, extract, business, report]
+
+linked_task_type: "结构化抽取"
+linked_size: "中"
+
+inputs:
+  - name: nl
+    type: natural_language
+    description: 用户的自然语言需求
+
+output:
+  format: json_object
+  schema_hint:
+    data_sources: list
+    filters: dict
+    analysis_dims: list
+    sinks: list
+    schedule: object
+
+template: |
+  你是一个商业报表需求分析师。请把下面的自然语言需求拆解为结构化要素，
+  以严格的 JSON 对象返回，不要任何额外文字、不要 markdown 围栏。
+
+  返回 JSON 必须包含这些字段：
+  - data_sources: 数据源列表（如 ["sales_db", "crm_api"]）
+  - filters: 筛选条件字典（时间范围、维度过滤等）
+  - analysis_dims: 需要分析的维度列表
+  - sinks: 输出渠道列表（如 ["dingtalk:运营群", "email:ops"]）
+  - schedule: 触发设置 {type: cron|webhook|manual, cron_expr?, natural_time?}
+
+  铁律：
+  - 不要硬编码任何具体平台名（不要写"百度OCR"，写"OCR"）
+  - 时间表达保留原文到 schedule.natural_time
+  - 数据源用业务名（如 sales_db）而非具体技术（postgresql）
+
+  用户需求：
+  {{nl}}
+
+test_cases:
+  - name: weekly-sales-report
+    inputs:
+      nl: "每周一上午 9 点查询销售数据库 sales_db, 写中文周报推钉钉运营群"
+    expected_categories: [data_sources, schedule, sinks]
+
+maintainer: "tests / 2026-05"
+provenance:
+  built_at: "2026-05-01"
+  built_by: manual
+  license: "MIT"
