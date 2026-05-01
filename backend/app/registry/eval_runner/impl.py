@@ -71,7 +71,29 @@ class EvalRunnerImpl:
         atoms_by_id = {n.asset_id: n for n in dag.nodes}
         actual_subs = self._collect_subcategories(dag, atoms_by_id)
 
-        report = await self._validator.validate(result["dsl"], result["target"])
+        # Multi-target aware validation: hybrid emits both dify+n8n; validate
+        # each output against its own target schema. Case passes if no errors
+        # across all emitted outputs.
+        outputs = result.get("outputs", {}) or {result["target"]: result["dsl"]}
+        per_target_reports = {}
+        for target_name, dsl_text in outputs.items():
+            per_target_reports[target_name] = await self._validator.validate(
+                dsl_text, target_name
+            )
+        # Synthesize a single ValidationReport-like view for downstream checks
+        all_issues = [
+            i for r in per_target_reports.values() for i in r.issues
+        ]
+        all_ok = all(r.ok for r in per_target_reports.values())
+
+        # Backward-compat shape used by the issue-checking branch below
+        from app.core.pipelines.factory.validator.interface import ValidationReport
+
+        report = ValidationReport(
+            ok=all_ok,
+            target=result["target"],
+            issues=all_issues,
+        )
 
         passed = True
         reasons: list[str] = []
