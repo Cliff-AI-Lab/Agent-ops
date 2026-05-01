@@ -106,3 +106,49 @@ cases:
       min_nodes: 3
       require_validator_ok: true
     tags: [mvp, event]
+
+  # ------ 扩展 W2 → W3：边界与多变体 ------
+
+  - case_id: c11-very-short-nl
+    description: 极简 NL—— 只给一个动词 + 一个名词
+    nl: 推送销售数据
+    expected:
+      min_nodes: 1
+      allowed_issue_kinds: [type_adapters_needed, no_candidate]
+    tags: [mvp, edge, terse]
+
+  - case_id: c12-multi-source-future
+    description: 多数据源（V2.0.6 才支持，当前预期 type_adapters_needed）
+    nl: 每周一从销售库 + 客服系统 webhook 同时取数据，合并分析后发钉钉
+    expected:
+      subcategories: [DB, HTTP, LLM, Notify]
+      min_nodes: 4
+      allowed_issue_kinds: [type_adapters_needed, no_candidate]
+    tags: [mvp, edge, multi-source]
+
+  - case_id: c13-english-nl
+    description: 英文需求（验证 IntentParser 多语言鲁棒）
+    nl: Every Monday at 9am query sales database, write a Chinese weekly report, push to DingTalk
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, edge, en]
+
+  - case_id: c14-very-precise-time
+    description: 精确时间表达（cron 解析挑战）
+    nl: 每月最后一个工作日下午 5 点 30 分查销售库，发月报到钉钉
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, edge, cron-complex]
+
+  - case_id: c15-output-format-variation
+    description: 输出格式变化（短摘要而非完整周报）
+    nl: 每天上午 9 点拉昨日订单总数，发一句话摘要到钉钉
+    expected:
+      subcategories: [DB, LLM, Notify]
+      min_nodes: 3
+      require_validator_ok: true
+    tags: [mvp, variant, summary]
