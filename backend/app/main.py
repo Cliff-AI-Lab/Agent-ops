@@ -10,6 +10,7 @@ import uvicorn
 from app.api.config import router as config_router
 from app.api.deliver import router as deliver_router
 from app.api.delivery import router as delivery_router
+from app.api.factory import router as factory_router
 from app.api.generate import router as generate_router
 from app.api.graph import router as graph_router
 from app.api.intent import router as intent_router
@@ -44,6 +45,7 @@ app.include_router(intent_router)
 app.include_router(workflows_router)
 app.include_router(marketplace_router)
 app.include_router(triage_router)
+app.include_router(factory_router)  # Phase 2 V2.0.2: factory session API
 
 
 @app.on_event("startup")
