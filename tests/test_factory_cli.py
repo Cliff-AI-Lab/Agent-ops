@@ -147,7 +147,14 @@ async def test_run_build_e2e_with_mocked_llm(mock_llm):
 
         result = await pipeline.build("test build")
         validator = DSLValidatorImpl()
-        report = await validator.validate(result["dsl"], result["target"])
+        # In hybrid mode, validate the dify slice; in single-target, use that target
+        target_for_validation = (
+            "dify" if "dify" in result["outputs"] else result["target"]
+        )
+        dsl_to_check = (
+            result["outputs"].get("dify") or result["dsl"]
+        )
+        report = await validator.validate(dsl_to_check, target_for_validation)
         assert report.ok is True or all(
             i.severity != "error" for i in report.issues
         )

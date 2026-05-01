@@ -58,11 +58,26 @@ async def _run_build(nl: str) -> dict[str, Any]:
     pipeline = FactoryPipeline(atoms_dir=atoms_dir)
     result = await pipeline.build(nl)
 
+    # Validate each target output independently (hybrid emits both)
     validator = DSLValidatorImpl()
-    report = await validator.validate(result["dsl"], result["target"])
+    validations: dict[str, dict] = {}
+    for target_name, dsl_text in result.get("outputs", {}).items():
+        report = await validator.validate(dsl_text, target_name)
+        validations[target_name] = {
+            "ok": report.ok,
+            "issues": [i.model_dump() for i in report.issues],
+        }
+    overall_ok = all(v["ok"] for v in validations.values()) if validations else False
     result["validation"] = {
-        "ok": report.ok,
-        "issues": [i.model_dump() for i in report.issues],
+        "ok": overall_ok,
+        "per_target": validations,
+        # legacy: combined error issues
+        "issues": [
+            {**i, "target": t}
+            for t, v in validations.items()
+            for i in v["issues"]
+            if i["severity"] == "error"
+        ],
     }
     return result
 
@@ -71,6 +86,7 @@ def _human_print(result: dict[str, Any]) -> None:
     intent = result["intent"]
     dag = result["dag"]
     val = result["validation"]
+    outputs = result.get("outputs", {})
     print(f"goal:    {intent.goal}")
     print(f"trigger: {intent.trigger.type} {intent.trigger.cron_expr or ''}")
     print(f"target:  {dag.target}")
@@ -78,7 +94,13 @@ def _human_print(result: dict[str, Any]) -> None:
     print(f"nodes:   {len(dag.nodes)}")
     print(f"edges:   {len(dag.edges)}")
     print(f"issues:  {len(dag.issues)}")
+    print(f"outputs: {', '.join(f'{t}={len(d)}c' for t, d in outputs.items())}")
     print(f"valid:   {'ok' if val['ok'] else 'FAIL'}")
+    for target_name, per in val.get("per_target", {}).items():
+        marker = "ok" if per["ok"] else "FAIL"
+        err_count = sum(1 for i in per["issues"] if i["severity"] == "error")
+        info_count = sum(1 for i in per["issues"] if i["severity"] == "info")
+        print(f"  {target_name:6s}: {marker} (err={err_count}, info={info_count})")
     if dag.issues:
         print("dag issues:")
         for i in dag.issues:
@@ -87,7 +109,7 @@ def _human_print(result: dict[str, Any]) -> None:
     if err:
         print("validation errors:")
         for i in err:
-            print(f"  - {i.get('message')}")
+            print(f"  - [{i.get('target','-')}] {i.get('message')}")
 
 
 def _machine_print(result: dict[str, Any]) -> None:
@@ -101,6 +123,7 @@ def _machine_print(result: dict[str, Any]) -> None:
                 "asset_ids": [n.asset_id for n in result["dag"].nodes],
                 "issues": result["dag"].issues,
                 "validation": result["validation"],
+                "outputs": result.get("outputs", {}),
                 "dsl": result["dsl"],
             },
             ensure_ascii=False,

@@ -108,15 +108,28 @@ async def test_e2e_sales_weekly_report():
     assert "atom.llm.chat.v1" in asset_ids
     assert "atom.notify.dingtalk.v1" in asset_ids
 
-    dsl = result["dsl"]
-    assert isinstance(dsl, str)
-    parsed = yaml.safe_load(dsl)
+    # Hybrid emits BOTH outputs in result['outputs'] dict
+    assert "outputs" in result
+    assert "dify" in result["outputs"]
+    assert "n8n" in result["outputs"]
+
+    # Dify side: only LLM node (s3)
+    parsed = yaml.safe_load(result["outputs"]["dify"])
     assert "app" in parsed
     assert "workflow" in parsed
     assert "factory_metadata" in parsed["workflow"]
-
-    # hybrid: only LLM node should be in dify YAML output
     dify_nodes = parsed["workflow"]["graph"]["nodes"]
     assert {n["id"] for n in dify_nodes} == {"s3"}
     assert dify_nodes[0]["type"] == "llm"
     assert dify_nodes[0]["data"]["llm_routing"]["task_type"] == "长文档分块总结"
+
+    # n8n side: schedule + db + notify
+    import json as _json
+    n8n_json = _json.loads(result["outputs"]["n8n"])
+    assert "nodes" in n8n_json
+    assert "connections" in n8n_json
+    n8n_node_names = [n["name"] for n in n8n_json["nodes"]]
+    assert any("(s1)" in n for n in n8n_node_names)
+    assert any("(s2)" in n for n in n8n_node_names)
+    assert any("(s4)" in n for n in n8n_node_names)
+    assert not any("(s3)" in n for n in n8n_node_names)
