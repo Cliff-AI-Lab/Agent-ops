@@ -1,5 +1,51 @@
 # Agent Ops — Release Notes
 
+## V2.0.1 — 2026-05-01 · Phase 1 W2 收尾包（首个工厂可执行版本）
+
+> 状态：可打包发布；ES-001 评测集 10/10 真 LLM 通过。
+
+### 新功能
+
+- **7 个真实组件全部就位**（W1 W2 实现）
+  - AtomLoader / IntentParser / SearchEngine V1 / Resolver / DifyCompiler V1 / DSLValidator V1 / FactoryPipeline
+- **5 个种子原子 YAML 完整入库**：DB / HTTP / LLM(含 model_routing) / Notify / Schedule
+- **factory CLI**：
+  - `factory build "<NL>"` — NL → Dify YAML
+  - `factory eval [--set ES-XXX] [--only case_id] [--json]` — 跑评测集
+- **EvalRunner 货架**（资产中心 #8 启用）+ ES-001 MVP 评测集（10 用例）
+- **3 个 LLM 横切机制**
+  - ModelRouter（V1 走 settings.harness_default_model，V2 接 /v1/models 动态选）
+  - LLM 节点不绑型号绑 task_type+size+fallback_chain
+  - RUIDONG_MODEL_FOR_<task>_<size> 占位符（部署期注入）
+
+### 验收
+
+- 真 LLM e2e：`每周一上午9点 销售周报推钉钉` → cron+DB+LLM+Notify 4 节点 hybrid Dify YAML
+- ES-001 评测：**10/10 = 100% 通过**（MVP gate ≥70% / GA gate ≥80% 双通过）
+- 测试：v0.5.0 基线 239 → V2.0.1 共 **317 全绿**
+
+### 8 条核心强制规则全部生效
+
+1. 禁 emoji（代码 0 emoji） / 2. Almanac 美学 / 3. iruidong 网关 /
+4. 大节点 Gate / 5. 画布美观简洁可动态（Phase 3）/
+6. R1 组件化（每组件 interface.py + impl.py + tests + README）/
+7. R2 架构图先行（Phase-1-架构图.md 先于代码）/
+8. R3 代码 Nexus（GitNexus 集成方案落地）
+
+### Phase 7 决策已锁
+
+V2.1.0 主线：多智能体 + 行业理解扩展。6 层架构（加 L4.5）+ Industry Router + 12 个 Industry Designer + OpenAI Agents SDK runtime。详见 Obsidian `Phase-7-多智能体与行业理解.md`。
+
+### 已知局限
+
+- DifyCompiler 输出是"Dify-shaped" YAML（结构对、字段近似），尚未对实际 Dify 沙箱做导入验证 → Phase 1 W3 任务
+- Resolver V1 用词法（tag/name/desc 重叠）打分，未接 embedding → Phase 2
+- 6 Gate 状态机未启用 → Phase 2
+- World 工厂前端未启用 → Phase 3
+- n8n compiler 未启用 → Phase 5
+
+---
+
 ## V2.0.0 — 2026-05-01 · 工厂基线（设计稿，未打包）
 
 > **重大版本跳跃**：v0.5.0 → V2.0.0 标志架构性变更——从"运行时协调器"升级为"智能体黑灯工厂"。
