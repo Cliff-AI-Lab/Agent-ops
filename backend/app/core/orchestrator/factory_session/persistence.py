@@ -34,6 +34,8 @@ class SessionRecord:
     final_artifact_path: str | None = None
     industry_code: str | None = None
     scenario: str | None = None
+    # Phase 5 multi-mode (V2.0.5+): 'design' (default) | 'variant' | 'production'
+    mode: str = "design"
 
 
 class SessionPersistence:
@@ -50,7 +52,12 @@ class SessionPersistence:
         nl: str,
         industry_code: str | None = None,
         scenario: str | None = None,
+        mode: str = "design",
     ) -> SessionRecord:
+        if mode not in ("design", "variant", "production"):
+            raise ValueError(
+                f"mode must be one of design/variant/production, got {mode!r}"
+            )
         sid = uuid.uuid4().hex
         now = _now_iso()
         record = SessionRecord(
@@ -61,16 +68,17 @@ class SessionPersistence:
             updated_at=now,
             industry_code=industry_code,
             scenario=scenario,
+            mode=mode,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
                 INSERT INTO factory_sessions (
                     session_id, nl, state, created_at, updated_at,
-                    industry_code, scenario
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    industry_code, scenario, mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (sid, nl, record.state.value, now, now, industry_code, scenario),
+                (sid, nl, record.state.value, now, now, industry_code, scenario, mode),
             )
             await db.commit()
         return record
@@ -79,7 +87,7 @@ class SessionPersistence:
         async with aiosqlite.connect(self._db_path) as db:
             cur = await db.execute(
                 "SELECT session_id, nl, state, created_at, updated_at, "
-                "final_run_id, final_artifact_path, industry_code, scenario "
+                "final_run_id, final_artifact_path, industry_code, scenario, mode "
                 "FROM factory_sessions WHERE session_id = ?",
                 (session_id,),
             )
@@ -96,6 +104,7 @@ class SessionPersistence:
             final_artifact_path=row[6],
             industry_code=row[7],
             scenario=row[8],
+            mode=row[9] if row[9] else "design",
         )
 
     async def update_state(

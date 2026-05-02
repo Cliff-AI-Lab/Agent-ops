@@ -67,7 +67,12 @@ CREATE TABLE factory_sessions (
   final_run_id TEXT,
   final_artifact_path TEXT,
   industry_code TEXT,
-  scenario TEXT
+  scenario TEXT,
+  -- Phase 5 multi-mode: 'design' / 'variant' / 'production'
+  -- design: all 6 gates require human (default; first-time agent class)
+  -- variant: gates 1-3 auto-pass; gates 4-6 (test/ui/deploy) require human
+  -- production: gates 1-5 auto-pass; only test gate (4) halts on eval fail
+  mode TEXT NOT NULL DEFAULT 'design'
 );
 CREATE INDEX IF NOT EXISTS idx_factory_sessions_state ON factory_sessions(state);
 
