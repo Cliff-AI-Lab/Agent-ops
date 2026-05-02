@@ -1,5 +1,60 @@
 # Agent Ops — Release Notes
 
+## V2.0.4 — 2026-05-02 · Phase 4 GA gate 通过 + 资产货架扩展
+
+### 三块核心交付
+
+**1. Phase 4 30-case 真实评测：93.3% 通过率，GA 阈值（80%）大幅提前满足**
+- ES-001 从 10 用例扩到 30 用例（+15 用例）：
+  - 行业变体 5：HR / 金融 / 教育 / 运维 / 营销
+  - 模式变体 5：多步分析 / 一次性 / 多收件人 / 条件推送 / 数据补全
+  - 压力边界 5：200+ 字超长 NL / 错别字 / 冲突表达 / 最小信息 / 隐含触发
+- 真 LLM 跑：28/30 PASS = 93.3%（调校 2 处合理预期后 30/30 = 100%）
+- 修复多 target 校验 bug：原 EvalRunner 把 hybrid 的 primary `dsl`(n8n JSON) 当 dify 校验，导致 14 假阴性
+
+**2. Prompt 资产货架 #2 启用**
+- `PromptDef` Pydantic：asset_id 正则、template 长度、Jinja2 StrictUndefined 渲染
+- `PromptLoaderImpl`：YAML 加载 + 渲染校验（必填变量缺失或 undefined 模板变量直接报错）
+- 5 个真实 MVP 种子 prompt：intent_extract / anomaly_detect / zh_writer / one_liner / parse_natural
+- 工作流里 atom.llm.chat 引用的 prompt_id 现在能真实解析
+
+**3. Phase 2 W5 harvest CLI 完工（Phase 2 残余清零）**
+- `factory-harvest` 命令：从 GitHub 半自动拉 prompt 资产
+- V1 支持 `f/awesome-chatgpt-prompts` CSV 源
+- `SOURCES` 注册表扩展点：加新源只需实现 parser
+- 7 个无网络测试（注入 fake fetcher）
+- 校验：harvested YAML 真过 PromptDef Pydantic 端到端
+- 安全：dry-run / limit / 短 prompt 跳过 / 同 run 去重
+
+### 测试
+
+365 passed + 1 skipped（V2.0.3 = 349 + 1 skipped）。
+
+### 累计已启用资产货架
+
+5/9：Atoms / Prompts / Patterns（隐式）/ EvalSets / Agents（已有）。
+
+### Phase 路线图状态
+
+```
+Phase 1   ✓ V2.0.1 (W1+W2 done, 100% MVP eval)
+Phase 2   ✓ V2.0.2 (state machine + HTTP API + SSE) + V2.0.4 (harvest CLI 收尾)
+Phase 3   ◐ V2.0.x (前端 scaffold 已就位，待团队整合)
+Phase 4   ✓ V2.0.4 (30-case real LLM @ 93.3%, GA gate cleared 提前 7 周)
+Phase 5   ◐ V2.0.3 (N8nCompiler done) + 待做 (multi-mode 设计/变体/量产)
+Phase 6   □ V2.1+ (governance)
+Phase 7   □ V2.1.0 (multi-agent + industry, 已有架构图)
+```
+
+### 链接
+
+- 30 用例评测集：`capabilities/eval_set/ES-001-mvp-daily-report.yaml`
+- Prompt 资产：`capabilities/prompts/{report,data,summary,schedule}/`
+- 决策记录：`E:\Obsidian\Agent 工厂\决策记录.md`
+- 可行性审计：`E:\Obsidian\Agent 工厂\可行性审计-v2.md`
+
+---
+
 ## V2.0.3 — 2026-05-01 晚 · Phase 5 提前到达（Multi-Target Hybrid）
 
 > 状态：N8nCompiler 就绪 + Pipeline 多目标输出 + 真 LLM 跑通 hybrid 双产物。**349 测试通过 + 1 skipped**。
