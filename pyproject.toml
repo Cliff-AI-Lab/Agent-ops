@@ -40,6 +40,8 @@ ops-initdb = "app.db.init_db:main"
 ops = "app.cli.ops:main"
 # V2.0.0 factory CLI — local pipeline runner
 factory = "app.cli.factory:main"
+# Phase 2 W5 — semi-auto prompt harvest from GitHub sources
+factory-harvest = "app.cli.harvest:main"
 
 [tool.setuptools.package-dir]
 "" = "backend"
