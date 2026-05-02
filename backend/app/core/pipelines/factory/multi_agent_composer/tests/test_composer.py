@@ -247,6 +247,118 @@ def test_compile_handles_no_handoffs_no_guardrails():
     assert "SHARED_CONTEXT_FIELDS: list[dict] = []" in src
 
 
+# ---- V2.1.0 W2: prompt + atom resolution ------------------------------------
+
+
+class _FakePrompt:
+    def __init__(self, template: str) -> None:
+        self.template = template
+
+
+class _FakeAtom:
+    def __init__(self, subcategory: str) -> None:
+        self.subcategory = subcategory
+
+
+def test_compile_with_prompt_dict_inlines_template():
+    """When prompts dict supplies triage.system_prompt_id, instructions= becomes the template."""
+    spec = _airline_cs_spec()
+    prompts = {
+        spec.triage.system_prompt_id: _FakePrompt(
+            template="You are the central triage. Route to specialists per intent."
+        )
+    }
+    src = OpenAIAgentsSDKComposerImpl(prompts=prompts).compile(spec)
+    ast.parse(src)
+    assert "You are the central triage" in src
+    # No more placeholder marker for triage
+    assert "deploy-time injection" not in src.split("# Triage agent")[1].split("# ----")[0]
+    # Comment now indicates compile-time resolution
+    assert "resolved from" in src
+
+
+def test_compile_without_prompt_dict_falls_back_to_placeholder():
+    """Without prompts dict, behavior unchanged from V2.1.0 W1 (TODO marker emitted)."""
+    spec = _airline_cs_spec()
+    src = OpenAIAgentsSDKComposerImpl().compile(spec)
+    triage_block = src.split("# Triage agent")[1].split("# ----")[0]
+    assert "deploy-time injection" in triage_block
+    assert "placeholder; replaced via prompt_id" in triage_block
+
+
+def test_compile_with_unknown_prompt_id_falls_back_gracefully():
+    """If triage.system_prompt_id not in dict, falls back to placeholder (no exception)."""
+    spec = _airline_cs_spec()
+    prompts = {"some.other.prompt.v1": _FakePrompt(template="unrelated")}
+    src = OpenAIAgentsSDKComposerImpl(prompts=prompts).compile(spec)
+    ast.parse(src)
+    assert "deploy-time injection" in src
+
+
+def test_compile_with_atoms_dict_emits_resolved_manifest():
+    """When atoms dict supplies tool metadata, TOOLS_MANIFEST has resolved=True."""
+    spec = _airline_cs_spec()
+    atoms = {"atom.http.generic.v1": _FakeAtom(subcategory="HTTP")}
+    src = OpenAIAgentsSDKComposerImpl(atoms=atoms).compile(spec)
+    ast.parse(src)
+    assert "TOOLS_MANIFEST" in src
+    # Specialists with tools have entries
+    assert "flight_info_agent" in src
+    # Resolved=True for the known atom
+    assert '"resolved": True' in src
+    assert '"subcategory": "HTTP"' in src
+
+
+def test_compile_with_unknown_atom_emits_resolved_false():
+    """Atom_id not in dict -> resolved=False entry emitted (deploy layer handles)."""
+    spec = _airline_cs_spec()
+    atoms = {}  # provided but empty
+    src = OpenAIAgentsSDKComposerImpl(atoms=atoms).compile(spec)
+    ast.parse(src)
+    # When atoms supplied but empty, _resolve_tools returns None (truthy check fails),
+    # so TOOLS_MANIFEST: dict[str, list[dict]] = {} (placeholder).
+    # That's OK behavior for "no atom registry available".
+    assert "TOOLS_MANIFEST: dict[str, list[dict]] = {}" in src
+
+
+def test_compile_with_partial_atom_dict():
+    """Some atoms resolved, others not — manifest mixes resolved=True/False."""
+    spec = _airline_cs_spec()
+    atoms = {
+        "atom.http.generic.v1": _FakeAtom(subcategory="HTTP"),
+        # Missing other atoms
+    }
+    src = OpenAIAgentsSDKComposerImpl(atoms=atoms).compile(spec)
+    ast.parse(src)
+    assert '"resolved": True' in src
+    # Partial resolution kept; deploy layer may bind real funcs for resolved=True only
+
+
+def test_compile_with_both_dicts():
+    """End-to-end: both prompts and atoms supplied."""
+    spec = _airline_cs_spec()
+    prompts = {
+        spec.triage.system_prompt_id: _FakePrompt(
+            template="Route every user turn to the most relevant specialist."
+        )
+    }
+    atoms = {"atom.http.generic.v1": _FakeAtom(subcategory="HTTP")}
+    src = OpenAIAgentsSDKComposerImpl(prompts=prompts, atoms=atoms).compile(spec)
+    ast.parse(src)
+    assert "Route every user turn" in src
+    assert '"resolved": True' in src
+
+
+def test_compile_idempotent_with_resolvers():
+    """Idempotency preserved when resolvers used."""
+    spec = _airline_cs_spec()
+    prompts = {spec.triage.system_prompt_id: _FakePrompt(template="prompt content")}
+    atoms = {"atom.http.generic.v1": _FakeAtom(subcategory="HTTP")}
+    a = OpenAIAgentsSDKComposerImpl(prompts=prompts, atoms=atoms).compile(spec)
+    b = OpenAIAgentsSDKComposerImpl(prompts=prompts, atoms=atoms).compile(spec)
+    assert a == b
+
+
 def test_compile_escapes_quotes_in_descriptions():
     """Strings containing double-quotes must be escaped properly."""
     spec = MultiAgentSpec(

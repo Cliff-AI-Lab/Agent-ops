@@ -4,19 +4,23 @@ Strategy: pure-template, deterministic, no LLM. Two-pass agent declaration:
   1. Declare all Agent() with empty handoffs
   2. Wire handoffs in second pass (avoids forward-reference issues)
 
-Tool/prompt resolution at compile-time:
-  tools: spec lists atom asset_ids; composer emits a placeholder list with
-         comments. Real tool function objects are wired by the deployment
-         layer (it knows which atoms are loaded and how to expose them).
-  prompts: spec references prompt_id; composer emits a TODO comment with
-           the id. Deployment-layer hook substitutes the rendered prompt.
+Compile-time resolution (V2.1.0 W2 enhancement):
+  prompt_loader (optional): if provided, triage.system_prompt_id is resolved
+    and the rendered template emitted as instructions= literal. Without it,
+    we emit a TODO comment + use triage.fallback_message as placeholder.
+  atom_loader (optional): if provided, tool atom_ids are looked up and a
+    TOOLS_MANIFEST dict emitted with atom metadata (subcategory + io_schema +
+    projections). Deploy layer reads it to bind real Python tool functions.
+
+Both loaders are optional to preserve V2.1.0-alpha backward compat.
 """
 from __future__ import annotations
 
 import ast
+import logging
 import re
 from textwrap import indent
-from typing import Iterable
+from typing import Iterable, Optional
 
 from app.core.pipelines.factory.ir.multi_agent import (
     GuardrailSpec,
@@ -25,6 +29,8 @@ from app.core.pipelines.factory.ir.multi_agent import (
     SpecialistSpec,
     TriageSpec,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _VAR_SAFE_RE = re.compile(r"[^a-zA-Z0-9_]+")
@@ -115,20 +121,62 @@ def _emit_specialist_decl(s: SpecialistSpec, prompt_id_override: str | None = No
     )
 
 
-def _emit_triage_decl(triage: TriageSpec, specialists: list[SpecialistSpec]) -> str:
+def _emit_triage_decl(
+    triage: TriageSpec,
+    specialists: list[SpecialistSpec],
+    resolved_prompt: Optional[str] = None,
+) -> str:
     valid_ids = {s.id for s in specialists}
     handoff_targets = [t for t in triage.initial_handoff_targets if t in valid_ids]
     handoff_vars = [_agent_var(t) for t in handoff_targets]
     handoff_list = "[" + ", ".join(handoff_vars) + "]" if handoff_vars else "[]"
+
+    if resolved_prompt is not None:
+        instructions_value = _py_str(resolved_prompt)
+        instructions_trailing_comment = ""
+        prompt_comment = f"# Prompt: resolved from {triage.system_prompt_id} at compile time"
+    else:
+        instructions_value = _py_str(triage.fallback_message)
+        instructions_trailing_comment = "  # placeholder; replaced via prompt_id at deploy time"
+        prompt_comment = f"# Prompt: {triage.system_prompt_id} (deploy-time injection)"
+
     return (
         f"# Triage agent (entry point)\n"
-        f"# Prompt: {triage.system_prompt_id} (deploy-time injection)\n"
+        f"{prompt_comment}\n"
         f"triage_agent = Agent(\n"
         f"    name={_py_str(triage.name)},\n"
-        f"    instructions={_py_str(triage.fallback_message)},  # placeholder; replaced via prompt_id\n"
+        f"    instructions={instructions_value},{instructions_trailing_comment}\n"
         f"    handoffs={handoff_list},\n"
         f")\n"
     )
+
+
+def _emit_tools_manifest(
+    specialists: list[SpecialistSpec], atom_metadata: dict[str, dict] | None
+) -> str:
+    """Emit per-specialist tool manifest. atom_metadata=None -> placeholder list."""
+    if atom_metadata is None or not any(s.tools for s in specialists):
+        return "TOOLS_MANIFEST: dict[str, list[dict]] = {}\n"
+
+    lines = ["# Tools manifest: deploy layer binds real Python functions per atom_id"]
+    lines.append("TOOLS_MANIFEST: dict[str, list[dict]] = {")
+    for s in specialists:
+        if not s.tools:
+            continue
+        var_key = _agent_var(s.id)
+        lines.append(f"    {_py_str(var_key)}: [")
+        for atom_id in s.tools:
+            meta = atom_metadata.get(atom_id, {"asset_id": atom_id, "resolved": False})
+            lines.append(
+                "        {"
+                + f"\"asset_id\": {_py_str(atom_id)}, "
+                + f"\"subcategory\": {_py_str(meta.get('subcategory', 'unknown'))}, "
+                + f"\"resolved\": {meta.get('resolved', False)!r}"
+                + "},"
+            )
+        lines.append("    ],")
+    lines.append("}\n")
+    return "\n".join(lines)
 
 
 def _emit_handoff_wiring(specialists: list[SpecialistSpec]) -> str:
@@ -207,7 +255,27 @@ def _emit_exports(specialists: list[SpecialistSpec]) -> str:
 
 
 class OpenAIAgentsSDKComposerImpl:
-    """Default composer for V2.1.0: emits openai-agents Python source."""
+    """Default composer for V2.1.0: emits openai-agents Python source.
+
+    V2.1.0 W1 (V2.0.5 release): pure-template, no resolvers.
+    V2.1.0 W2 (this): optional prompt_loader + atom_loader for compile-time
+                      resolution. Backward compatible — both loaders default None.
+    """
+
+    def __init__(
+        self,
+        prompts: Optional[dict] = None,  # dict[str, PromptDef] (asset_id -> PromptDef)
+        atoms: Optional[dict] = None,    # dict[str, AtomDef]   (asset_id -> AtomDef)
+    ) -> None:
+        """
+        Args:
+            prompts: lookup table for prompt_id resolution. Build via
+                     PromptLoaderImpl().load_all(prompts_dir). None = skip resolution.
+            atoms:   lookup table for atom_id resolution. Build via
+                     AtomLoaderImpl().load_all(atoms_dir). None = skip resolution.
+        """
+        self._prompts = prompts or {}
+        self._atoms = atoms or {}
 
     def compile(self, spec: MultiAgentSpec) -> str:
         if spec.runtime != "openai_agents_sdk":
@@ -219,6 +287,10 @@ class OpenAIAgentsSDKComposerImpl:
         if issues:
             raise ValueError(f"refusing to compile spec with structural issues: {issues}")
 
+        # Compile-time resolution (V2.1.0 W2)
+        resolved_triage_prompt = self._resolve_prompt(spec.triage.system_prompt_id)
+        atom_metadata = self._resolve_tools(spec)
+
         sections: list[str] = [
             _emit_header_comment(spec),
             _emit_imports(),
@@ -229,13 +301,14 @@ class OpenAIAgentsSDKComposerImpl:
         for s in spec.specialists:
             sections.append(_emit_specialist_decl(s))
         sections.append("# ---- Triage (entry point) ----\n")
-        sections.append(_emit_triage_decl(spec.triage, spec.specialists))
+        sections.append(_emit_triage_decl(spec.triage, spec.specialists, resolved_triage_prompt))
         sections.append("# ---- Handoff wiring ----\n")
         sections.append(_emit_handoff_wiring(spec.specialists))
         sections.append("# ---- Metadata exports (introspection / deploy-time wiring) ----\n")
         sections.append(_emit_handoff_metadata(spec.handoffs))
         sections.append(_emit_guardrails(spec.guardrails))
         sections.append(_emit_shared_context(spec))
+        sections.append(_emit_tools_manifest(spec.specialists, atom_metadata))
         sections.append("# ---- Public entry points ----\n")
         sections.append(_emit_exports(spec.specialists))
         body = "\n".join(sections)
@@ -249,3 +322,39 @@ class OpenAIAgentsSDKComposerImpl:
             ) from exc
 
         return body
+
+    def _resolve_prompt(self, prompt_id: str) -> Optional[str]:
+        """Look up prompt_id in the prompts dict; return raw template text or None."""
+        if not self._prompts or not prompt_id:
+            return None
+        prompt = self._prompts.get(prompt_id)
+        if prompt is None:
+            logger.warning("prompt %r not in supplied prompts dict", prompt_id)
+            return None
+        return getattr(prompt, "template", None)
+
+    def _resolve_tools(self, spec: MultiAgentSpec) -> Optional[dict[str, dict]]:
+        """For each tool atom_id across all specialists, look up metadata.
+
+        Returns None when no atoms dict provided (signals "skip TOOLS_MANIFEST").
+        Returns {} when atoms dict provided but spec uses no tools.
+        Returns dict[atom_id, metadata] when both provided.
+        """
+        if not self._atoms:
+            return None
+        all_tool_ids: set[str] = {tid for s in spec.specialists for tid in s.tools}
+        if not all_tool_ids:
+            return {}
+        metadata: dict[str, dict] = {}
+        for atom_id in all_tool_ids:
+            atom = self._atoms.get(atom_id)
+            if atom is None:
+                logger.warning("atom %r not in supplied atoms dict", atom_id)
+                metadata[atom_id] = {"asset_id": atom_id, "resolved": False}
+                continue
+            metadata[atom_id] = {
+                "asset_id": atom_id,
+                "subcategory": getattr(atom, "subcategory", "unknown"),
+                "resolved": True,
+            }
+        return metadata
