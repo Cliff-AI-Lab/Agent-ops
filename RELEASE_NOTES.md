@@ -1,5 +1,66 @@
 # Agent Ops — Release Notes
 
+## V2.0.5 — 2026-05-02 · V1 GA  Lights-Out Agent Factory
+
+> **V1 General Availability**：从 V0.5.0 "deterministic runtime" 到 V2.0.5 "黑灯智能体工厂"完成。
+
+### V1 GA 验收清单
+
+| 项 | 状态 |
+|---|---|
+| 7 个工厂组件全部真实可工作 | ✓ AtomLoader / IntentParser / SearchEngine / Resolver / DifyCompiler / N8nCompiler / Validator + Pipeline |
+| 6 Gate 状态机 + HTTP API + SSE | ✓ V2.0.2 |
+| 多 target hybrid（Dify YAML + n8n JSON 一次双产） | ✓ V2.0.3 |
+| 多模式（设计/变体/量产 自动通关） | ✓ 此版本 |
+| 30 用例真实 LLM 评测 ≥ 80% GA 阈值 | ✓ 93.3%（V2.0.4） |
+| 不破坏 v0.5.0 基线 239 测试 | ✓（已稳定增长到 369） |
+| Almanac UI 风格指南 + 三图分立架构 | ✓ |
+| 8 条核心强制规则全部体现在代码 | ✓ |
+
+### Phase 5 多模式（此版本核心）
+
+```
+设计模式 design       all 6 gates require human (default; first time agent class)
+变体模式 variant      gates 1-3 auto-pass; gates 4-6 (test/ui/deploy) human
+量产模式 production   all 6 gates auto-pass (batch fire-and-forget)
+```
+
+新 API：`session.run_to_next_human_gate()` —— 按 mode 跳过可自动通关的 Gate，
+停在首个需人工的 Gate 或终态。Gate 决策审计日志记录 `decided_by='auto:<mode>'`。
+
+### 测试
+
+369 passed + 1 skipped（v0.5.0 基线 239 → V2.0.5 = +130 真实测试）。
+
+### 资产货架启用度
+
+5/9：Atoms / Prompts / Patterns（隐式）/ EvalSets / Agents（已有）
+
+待 V2.1+ 启用：Skills / MemSchemas / CtxStrategies / KBases。
+
+### 下一阶段路线
+
+- **V2.0.6+**：治理与可观测（成本闸门、依赖图谱、灰度回灌）
+- **V2.1.0**：**Phase 7** 多智能体 + 行业理解（L4.5 多 Agent 应用层 + 12 行业 Designer + Industry Router + OpenAI Agents SDK runtime）。Hello world: 航司客服等价系统（cs-agents-demo 等价）。
+
+### 13 周路线图实绩
+
+```
+Plan:      Phase 1 (W1-3)  Phase 2 (W4-5)  Phase 3 (W6-8)  Phase 4 (W9-10)  Phase 5 (W11-13) = V1 GA
+Actual:    Phase 1 + 2 + 部分 4 + 5  在 W1 末交付。
+Phase 3 (前端) scaffold 已就位，团队整合。
+GA 阈值 80% 在 Phase 1 W2 末（93.3%）就达成，远早于计划。
+```
+
+### 链接
+
+- 主基线：`E:\Obsidian\Agent 工厂\Agent-工厂-v1-基线设计.md`
+- 决策记录：`E:\Obsidian\Agent 工厂\决策记录.md`
+- 可行性审计：`E:\Obsidian\Agent 工厂\可行性审计-v2.md`
+- Phase 7 设计：`E:\Obsidian\Agent 工厂\进度看板\Phase-7-多智能体与行业理解.md`
+
+---
+
 ## V2.0.4 — 2026-05-02 · Phase 4 GA gate 通过 + 资产货架扩展
 
 ### 三块核心交付

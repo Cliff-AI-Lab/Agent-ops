@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.4"
-description = "Agent Ops V2.0.4 — Phase 4 30-case eval @ 93.3% (GA gate cleared) + Prompt shelf #2 activated (5 seeds) + factory-harvest CLI (Phase 2 W5 closed)."
+version = "2.0.5"
+description = "Agent Ops V2.0.5 — V1 GA. Lights-out agent factory: NL → Intent → DAG → Dify+n8n DSL → Deploy. 7 components real, 6 Gate state machine + HTTP/SSE, multi-target hybrid, multi-mode (设计/变体/量产), 30-case real LLM eval @ 93.3%, 369 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
