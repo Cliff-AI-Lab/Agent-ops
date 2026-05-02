@@ -1,5 +1,96 @@
 # Agent Ops — Release Notes
 
+## V2.0.6 — 2026-05-02 · Phase 7 W1+W2 complete (multi-agent path online)
+
+> V2.1.0 主线提前到达：从 V1 GA（V2.0.5）到 multi-agent factory 端到端可用，
+> cs-agents-demo 等价系统已可由 NL 单条命令生成 + 部署。
+
+### 新增能力（Phase 7 整体落地）
+
+**双阶段调度（W1）**
+- `IndustryRouter`：NL → 12 行业分类 + business_scenario + is_multi_agent 判定
+- `GeneralDesigner`（industry_code='01' 通用兜底）：Classification + NL → MultiAgentSpec
+  - LLM 抽取 specialists / triage targets / shared context
+  - agent_class 路由（基于 scenario 关键词映射 7 类 L4）
+  - 默认 guardrails 注入（relevance + jailbreak）
+  - 引用过滤（无效 handoff / triage 自动剔除）
+  - validate_graph 出口校验 + ValueError on issues
+
+**MultiAgentSpec IR（W1）**
+- `MultiAgentSpec` Pydantic：完整多智能体应用 schema（triage + specialists[] + handoffs[] + guardrails[] + shared_context[]）
+- `validate_graph()` 反向引用检查
+- 锁定 runtime='openai_agents_sdk'（决策记录）
+
+**MultiAgentComposer（W1+W2）**
+- Pure-template, no LLM, AST self-check
+- 两遍 Agent 声明（避免前置引用）
+- 字符串安全转义 / 变量名 sanitize
+- W2 增强：可选 prompts/atoms dict 注入 → 编译期解析 prompt_id + tool_id metadata
+- 输出包含 ENTRY_AGENT / ALL_AGENTS / HANDOFF_RULES / GUARDRAILS / SHARED_CONTEXT_FIELDS / TOOLS_MANIFEST
+
+**MultiAgentFactoryPipeline（W2）**
+- 端到端 NL → multi-agent 系统的协调器
+- `build()` Stage 1+2+3 自动串联
+- `build_with_classification()` Switcher 用此跳过重复 classify
+- `deploy(result, output_root)` 写 main.py + spec.json + manifest.json 三件套
+
+**FactorySwitcher + factory build-auto CLI（W2）**
+- 顶层 NL 入口：单次 LLM classify 即决定 single vs multi 路径
+- 转发 classification 给目标 pipeline，避免重复调用
+- 新 CLI: `factory build-auto '<NL>' [--deploy DIR] [--json]`
+- 输出 schema：`{path: 'single'|'multi', classification, ...}`
+
+### 关键工程铁律保留
+
+- emoji 0（核心强制规则）
+- 无硬编码模型名（睿动 ModelRouter）
+- R1 组件化（每个新组件含 interface + impl + tests + README）
+- R2 架构图先行（Phase 7 架构图已锁）
+- AST 自检（Composer 出 Python 立刻 ast.parse 验证）
+
+### 测试
+
+```
+369 V2.0.5  →  378 (+IR)
+            →  392 (+IndustryRouter)
+            →  403 (+GeneralDesigner)
+            →  419 (+Composer V1)
+            →  427 (+Composer 编译期解析)
+            →  439 (+MultiAgentFactoryPipeline + deploy)
+            →  445 (+FactorySwitcher) ← 此版本
+```
+
+### Hello World 全栈可达
+
+```
+$ uv run factory build-auto '做一个航司客服系统，包含订票、退票、选座、行李 FAQ、补偿处理多个专员' --deploy /tmp/airline_cs
+
+path:        multi
+industry:    01 通用
+scenario:    客服
+confidence:  0.92
+system:      Airline Customer Service System
+specialists: 5
+handoffs:    4
+guardrails:  2
+slug:        airline_customer_service_system
+src_bytes:   ~3500
+
+deployed:
+  main:     /tmp/airline_cs/airline_customer_service_system/main.py
+  spec:     /tmp/airline_cs/airline_customer_service_system/spec.json
+  manifest: /tmp/airline_cs/airline_customer_service_system/manifest.json
+```
+
+### V2.1.0 待做
+
+- 集成 Switcher 到 Agent World `/api/factory/build` HTTP 路由
+- 12 行业各自专属 Designer（V2.1.0 W3+ 批量上线）
+- 多 agent 评测集（ES-002 multi-agent，30 用例 cs/finance/ops 等）
+- World 创作者中心整合 multi-agent 生产单 UI
+
+---
+
 ## V2.0.5 — 2026-05-02 · V1 GA  Lights-Out Agent Factory
 
 > **V1 General Availability**：从 V0.5.0 "deterministic runtime" 到 V2.0.5 "黑灯智能体工厂"完成。

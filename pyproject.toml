@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.5"
-description = "Agent Ops V2.0.5 — V1 GA. Lights-out agent factory: NL → Intent → DAG → Dify+n8n DSL → Deploy. 7 components real, 6 Gate state machine + HTTP/SSE, multi-target hybrid, multi-mode (设计/变体/量产), 30-case real LLM eval @ 93.3%, 369 tests."
+version = "2.0.6"
+description = "Agent Ops V2.0.6 — Phase 7 W1+W2 complete. Multi-agent factory path: IndustryRouter + GeneralDesigner + MultiAgentComposer + FactorySwitcher. 'factory build-auto' CLI auto-routes single vs multi-agent. cs-agents-demo equivalent producible end-to-end. 445 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
