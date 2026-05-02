@@ -101,10 +101,24 @@ class MultiAgentFactoryPipeline:
         """
         if not nl or not nl.strip():
             raise ValueError("nl cannot be empty")
+        classification = await self._router.classify(nl)
+        return await self.build_with_classification(nl, classification)
+
+    async def build_with_classification(
+        self, nl: str, classification: IndustryClassification
+    ) -> dict[str, Any]:
+        """Build with pre-computed classification (Switcher avoids re-classify).
+
+        Same contract as build() but skips Stage 1. Useful when an outer
+        orchestrator (FactorySwitcher) has already classified the NL and
+        wants to dispatch to either single- or multi-agent pipelines without
+        spending an extra LLM call.
+        """
+        if not nl or not nl.strip():
+            raise ValueError("nl cannot be empty")
 
         emit("L3", "MultiAgentFactoryPipeline", "build_start", f"nl_len={len(nl)}")
 
-        classification: IndustryClassification = await self._router.classify(nl)
         if not classification.is_multi_agent:
             raise MultiAgentNotApplicable(
                 f"classification.is_multi_agent=False (industry={classification.industry_code} "

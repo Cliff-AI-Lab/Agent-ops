@@ -187,11 +187,80 @@ def _human_eval_print(report: Any) -> None:
                 print(f"    -> {reason}")
 
 
+async def _run_build_auto(nl: str, deploy_dir: Path | None) -> dict[str, Any]:
+    """V2.1.0+ Phase 7: auto-route NL between single-agent and multi-agent paths."""
+    from app.core.pipelines.factory.pipeline import FactoryPipeline
+    from app.core.pipelines.factory.switcher import FactorySwitcher
+
+    atoms_dir = _atoms_dir()
+    if not atoms_dir.exists():
+        raise FileNotFoundError(
+            f"atoms dir missing: {atoms_dir} "
+            f"(set FACTORY_ATOMS_DIR or run from agent-harness root)"
+        )
+
+    single = FactoryPipeline(atoms_dir=atoms_dir)
+    switcher = FactorySwitcher(single_pipeline=single)
+    result = await switcher.build(nl)
+
+    if deploy_dir is not None and result["path"] == "multi":
+        # Re-import here to avoid circular reference at module-load time
+        from app.core.pipelines.factory.multi_agent_pipeline import (
+            MultiAgentFactoryPipeline,
+        )
+
+        multi = MultiAgentFactoryPipeline()
+        paths = multi.deploy(result, deploy_dir)
+        result["deployed_files"] = {k: str(v) for k, v in paths.items()}
+    return result
+
+
+def _human_print_auto(result: dict[str, Any]) -> None:
+    cls = result["classification"]
+    path = result["path"]
+    print(f"path:        {path}")
+    print(
+        f"industry:    {cls.industry_code} {cls.primary}"
+        + (f" / {cls.sub}" if cls.sub else "")
+    )
+    print(f"scenario:    {cls.business_scenario or '-'}")
+    print(f"confidence:  {cls.confidence:.2f}")
+    print(f"reasoning:   {cls.reasoning}")
+    print()
+
+    if path == "multi":
+        spec = result["spec"]
+        print(f"system:      {spec.name}")
+        print(f"specialists: {len(spec.specialists)}")
+        print(f"handoffs:    {len(spec.handoffs)}")
+        print(f"guardrails:  {len(spec.guardrails)}")
+        print(f"slug:        {result['system_slug']}")
+        print(f"src_bytes:   {len(result['source_code'])}")
+        if "deployed_files" in result:
+            print()
+            print("deployed:")
+            for k, v in result["deployed_files"].items():
+                print(f"  {k}: {v}")
+    else:
+        # single: forward to existing _human_print(no validation key here yet)
+        intent = result["intent"]
+        dag = result["dag"]
+        print(f"goal:        {intent.goal}")
+        print(f"trigger:     {intent.trigger.type} {intent.trigger.cron_expr or ''}")
+        print(f"target:      {dag.target}")
+        print(f"nodes:       {len(dag.nodes)}")
+        print(f"edges:       {len(dag.edges)}")
+        outs = result.get("outputs", {})
+        if outs:
+            sizes = ", ".join(f"{k}={len(v)}c" for k, v in outs.items())
+            print(f"outputs:     {sizes}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="factory", description="Agent Ops V2.0.0 factory")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_build = sub.add_parser("build", help="NL -> Dify YAML")
+    p_build = sub.add_parser("build", help="NL -> Dify YAML (single-agent path only)")
     p_build.add_argument("nl", help="自然语言需求")
     p_build.add_argument("--output", "-o", default=None, help="写 DSL 到文件")
     p_build.add_argument("--json", action="store_true", help="机器可读输出")
@@ -200,6 +269,18 @@ def main(argv: list[str] | None = None) -> int:
     p_eval.add_argument("--set", "-s", default=None, help="eval_set_id; 默认第一个")
     p_eval.add_argument("--only", default=None, help="只跑某一 case_id")
     p_eval.add_argument("--json", action="store_true", help="机器可读输出")
+
+    p_auto = sub.add_parser(
+        "build-auto",
+        help="V2.1+ NL -> single OR multi-agent (auto-routed by IndustryRouter)",
+    )
+    p_auto.add_argument("nl", help="自然语言需求")
+    p_auto.add_argument(
+        "--deploy",
+        default=None,
+        help="部署到目录（多智能体路径）：写 main.py + spec.json + manifest.json",
+    )
+    p_auto.add_argument("--json", action="store_true", help="机器可读输出（不渲染 spec object）")
 
     args = parser.parse_args(argv)
 
@@ -243,6 +324,40 @@ def main(argv: list[str] | None = None) -> int:
 
         if not report.is_mvp_threshold_met:
             return 3
+        return 0
+
+    if args.cmd == "build-auto":
+        deploy_dir = Path(args.deploy) if args.deploy else None
+        try:
+            result = asyncio.run(_run_build_auto(args.nl, deploy_dir))
+        except FileNotFoundError as exc:
+            print(f"[factory] config error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] build-auto failed: {exc}", file=sys.stderr)
+            return 4
+
+        if args.json:
+            cls = result["classification"]
+            payload: dict[str, Any] = {
+                "path": result["path"],
+                "classification": cls.model_dump(),
+            }
+            if result["path"] == "multi":
+                payload["system_slug"] = result["system_slug"]
+                payload["source_code"] = result["source_code"]
+                payload["spec"] = result["spec"].model_dump()
+                if "deployed_files" in result:
+                    payload["deployed_files"] = result["deployed_files"]
+            else:
+                payload["goal"] = result["intent"].goal
+                payload["target"] = result["dag"].target
+                payload["node_count"] = len(result["dag"].nodes)
+                payload["asset_ids"] = [n.asset_id for n in result["dag"].nodes]
+                payload["outputs"] = result.get("outputs", {})
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        else:
+            _human_print_auto(result)
         return 0
 
     parser.error(f"unknown command: {args.cmd}")
