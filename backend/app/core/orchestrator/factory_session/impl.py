@@ -76,8 +76,9 @@ class FactorySessionImpl:
         nl: str,
         industry_code: str | None = None,
         scenario: str | None = None,
+        mode: str = "design",
     ) -> "FactorySessionImpl":
-        record = await persistence.create(nl, industry_code, scenario)
+        record = await persistence.create(nl, industry_code, scenario, mode=mode)
         ev.session_created(record.session_id, nl)
         return cls(pipeline, persistence, record)
 
@@ -160,6 +161,56 @@ class FactorySessionImpl:
         checklist = self._build_checklist(stage)
         ev.gate_open(self.session_id, stage.value, ai_report, checklist)
         return gate_state
+
+    def _gate_should_auto_pass(self, gate_state: FactorySessionState) -> bool:
+        """Phase 5 multi-mode: decide whether the current Gate auto-passes.
+
+        - design (default): all 6 gates require human → never auto-pass
+        - variant:          gates 1-3 (design/wrap/assemble) auto; 4-6 (test/ui/deploy) human
+        - production:       all 6 gates auto-pass (batch/量产, fire-and-forget)
+        """
+        gate_order = {
+            FactorySessionState.GATE_DESIGN: 1,
+            FactorySessionState.GATE_WRAP: 2,
+            FactorySessionState.GATE_ASSEMBLE: 3,
+            FactorySessionState.GATE_TEST: 4,
+            FactorySessionState.GATE_UI: 5,
+            FactorySessionState.GATE_DEPLOY: 6,
+        }
+        n = gate_order.get(gate_state)
+        if n is None:
+            return False
+        mode = self._record.mode
+        if mode == "design":
+            return False
+        if mode == "variant":
+            return n <= 3
+        if mode == "production":
+            return True
+        return False
+
+    async def run_to_next_human_gate(self) -> FactorySessionState:
+        """Advance through stages auto-passing any gate the mode allows.
+
+        Stops at:
+          - a Gate that requires human attention (per mode), or
+          - a terminal state (RELEASED / CANCELLED / FAILED).
+
+        For mode='design' this behaves like a single run_next_stage().
+        For mode='variant' / 'production' it auto-traverses skip-able gates.
+        """
+        state = await self.run_next_stage()
+        while is_gate(state) and self._gate_should_auto_pass(state):
+            state = await self.apply_gate_decision(
+                "pass",
+                payload={"auto": True, "mode": self._record.mode},
+                decided_by=f"auto:{self._record.mode}",
+            )
+            if is_terminal(state):
+                return state
+            if not is_gate(state):
+                state = await self.run_next_stage()
+        return state
 
     async def apply_gate_decision(
         self,

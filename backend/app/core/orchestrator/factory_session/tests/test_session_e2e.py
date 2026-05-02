@@ -240,3 +240,79 @@ async def test_run_next_stage_at_gate_raises(temp_db, pipeline_with_mock_llm, tm
     assert is_gate(session.state)
     with pytest.raises(RuntimeError, match="apply_gate_decision"):
         await session.run_next_stage()
+
+
+# ----- Phase 5: multi-mode (设计 / 变体 / 量产) -----
+
+
+@pytest.mark.asyncio
+async def test_design_mode_default_does_not_auto_pass(
+    temp_db, pipeline_with_mock_llm, tmp_path, monkeypatch
+):
+    """Default mode='design': run_to_next_human_gate stops at first gate."""
+    monkeypatch.chdir(tmp_path)
+    persistence = SessionPersistence(db_path=temp_db)
+    session = await FactorySessionImpl.create(
+        pipeline=pipeline_with_mock_llm, persistence=persistence, nl="测试 design 模式"
+    )
+    state = await session.run_to_next_human_gate()
+    assert state == FactorySessionState.GATE_DESIGN  # stops at first gate
+
+
+@pytest.mark.asyncio
+async def test_variant_mode_skips_gates_1_2_3_stops_at_test(
+    temp_db, pipeline_with_mock_llm, tmp_path, monkeypatch
+):
+    """variant mode: gates 1-3 auto-pass, stops at gate 4 (test) for human."""
+    monkeypatch.chdir(tmp_path)
+    persistence = SessionPersistence(db_path=temp_db)
+    session = await FactorySessionImpl.create(
+        pipeline=pipeline_with_mock_llm,
+        persistence=persistence,
+        nl="测试 variant 模式",
+        mode="variant",
+    )
+    state = await session.run_to_next_human_gate()
+    assert state == FactorySessionState.GATE_TEST
+
+    # 3 gate_decisions recorded, all pass, decided_by=auto:variant
+    decisions = await persistence.list_gate_decisions(session.session_id)
+    assert len(decisions) == 3
+    assert all(d["decision"] == "pass" for d in decisions)
+    assert [d["gate_id"] for d in decisions] == ["design", "wrap", "assemble"]
+
+
+@pytest.mark.asyncio
+async def test_production_mode_runs_to_release(
+    temp_db, pipeline_with_mock_llm, tmp_path, monkeypatch
+):
+    """production mode: all 6 gates auto-pass, ends at RELEASED."""
+    monkeypatch.chdir(tmp_path)
+    persistence = SessionPersistence(db_path=temp_db)
+    session = await FactorySessionImpl.create(
+        pipeline=pipeline_with_mock_llm,
+        persistence=persistence,
+        nl="测试 production 模式",
+        mode="production",
+    )
+    state = await session.run_to_next_human_gate()
+    assert state == FactorySessionState.RELEASED
+
+    decisions = await persistence.list_gate_decisions(session.session_id)
+    assert len(decisions) == 6
+    assert [d["gate_id"] for d in decisions] == [
+        "design", "wrap", "assemble", "test", "ui", "deploy"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_mode_rejected(temp_db, pipeline_with_mock_llm, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    persistence = SessionPersistence(db_path=temp_db)
+    with pytest.raises(ValueError, match="mode must be"):
+        await FactorySessionImpl.create(
+            pipeline=pipeline_with_mock_llm,
+            persistence=persistence,
+            nl="测试",
+            mode="bogus",
+        )
