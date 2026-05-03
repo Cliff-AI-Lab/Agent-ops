@@ -1,5 +1,58 @@
 # Agent Ops — Release Notes
 
+## V2.0.7 — 2026-05-02 · Phase 7 W3 prep (dispatch + HTTP + multi-agent eval)
+
+> Phase 7 W2 收尾 + W3 启动准备：行业 Designer 调度基础设施 + HTTP API 接入 +
+> 多智能体评测集与 runner，下一步可批量上线 11 行业 Designer。
+
+### 新增能力
+
+**DesignerRegistry**（industry_designer/registry.py）
+- `industry_code -> IndustryDesigner` 调度表
+- 查找顺序：精确匹配 → 默认 '01' fallback → KeyError
+- `default_registry()` ship GeneralDesigner only；V2.1.0 W3+ 上 11 个行业 Designer
+- `MultiAgentFactoryPipeline` 接受 `designer` (pinned) 或 `designer_registry` (dispatch)，互斥
+- 默认行为：自动构建 default_registry，按 `classification.industry_code` 路由
+
+**HTTP `/api/factory/build`**
+- 通过 `FactorySwitcher` 一次性 NL → 单/多 agent 系统
+- 与 6-Gate `/start` 区别：单次同步调用，无 SSE
+- `deploy=True` 时多智能体路径自动写 `agents/__generated__/multi_agent/<slug>/{main.py,spec.json,manifest.json}`
+- 所有 Pydantic 对象 `.model_dump()` 序列化为 JSON
+
+**ES-002 多智能体评测集**（10 cases）
+- 通用客服 3 (airline/ecommerce/saas)
+- finance 2 (loan/insurance)
+- medical 1 / education 1 / government 1
+- boundary 2 (minimal-2-specialist / handoff-rich)
+
+**MultiAgentEvalRunnerImpl**
+- 跑 ES-002，按 `ExpectedShape` 多智能体字段判定
+- classify_industry / classify_scenario / classify_is_multi_agent
+- min_specialists / max_specialists / min_handoffs / require_compose_ok
+- 异常处理鲁棒：classify 网络异常时 case 失败但 runner 不崩
+
+### `ExpectedShape` 扩展（向后兼容）
+为 ES-001 单工作流测试新加 8 个 Optional 字段：3 classify + 3 specialist count + min_handoffs + require_compose_ok。
+单工作流 runner 忽略；多智能体 runner 用之。
+
+### 测试
+
+```
+445 (V2.0.6 Phase 7 W1+W2)
++8   DesignerRegistry
++5   MultiAgentEvalRunner
+=========================
+458 passed + 1 skipped
+```
+
+### V2.1.0 W3 待做
+- 11 行业专属 Designer（Finance / Medical / Education / Government 等）批量上线
+- 真 LLM 跑 ES-002 GA pass rate 验证
+- World 创作者中心 UI 集成 `/api/factory/build`（Phase 3 scaffold 已就位）
+
+---
+
 ## V2.0.6 — 2026-05-02 · Phase 7 W1+W2 complete (multi-agent path online)
 
 > V2.1.0 主线提前到达：从 V1 GA（V2.0.5）到 multi-agent factory 端到端可用，

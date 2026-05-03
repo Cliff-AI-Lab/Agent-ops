@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.6"
-description = "Agent Ops V2.0.6 — Phase 7 W1+W2 complete. Multi-agent factory path: IndustryRouter + GeneralDesigner + MultiAgentComposer + FactorySwitcher. 'factory build-auto' CLI auto-routes single vs multi-agent. cs-agents-demo equivalent producible end-to-end. 445 tests."
+version = "2.0.7"
+description = "Agent Ops V2.0.7 — Phase 7 W3 prep. DesignerRegistry (industry dispatch) + HTTP /api/factory/build (stateless Switcher) + ES-002 multi-agent eval (10 cases) + MultiAgentEvalRunnerImpl. 458 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
