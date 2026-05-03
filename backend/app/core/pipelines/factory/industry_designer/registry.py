@@ -68,9 +68,24 @@ def default_registry(
 ) -> DesignerRegistry:
     """Build the V2.1.0 default registry with all currently shipped Designers.
 
-    V2.1.0 W1+W2: only GeneralDesigner (industry_code='01').
-    V2.1.0 W3+: register Finance / Manufacturing / etc. as they ship.
+    V2.1.0 W1+W2: GeneralDesigner only (industry_code='01').
+    V2.1.0 W3 (this version): + FinanceDesigner / MedicalDesigner /
+                                GovernmentDesigner / RetailDesigner.
+    V2.1.0 W4+: + Manufacturing / Energy / Transportation / Education /
+                  Media / Telecom / SmartCity (TBD).
     """
+    # Imports here to avoid circular reference at module load time
+    from app.core.pipelines.factory.industry_designer.specialized import (
+        FinanceDesigner,
+        GovernmentDesigner,
+        MedicalDesigner,
+        RetailDesigner,
+    )
+
     reg = DesignerRegistry(default_industry_code="01")
     reg.register(GeneralDesigner(llm_client=llm_client, model_router=model_router))
+    reg.register(FinanceDesigner(llm_client=llm_client, model_router=model_router))
+    reg.register(MedicalDesigner(llm_client=llm_client, model_router=model_router))
+    reg.register(GovernmentDesigner(llm_client=llm_client, model_router=model_router))
+    reg.register(RetailDesigner(llm_client=llm_client, model_router=model_router))
     return reg
