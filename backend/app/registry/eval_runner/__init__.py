@@ -8,10 +8,12 @@ from app.registry.eval_runner.models import (
     EvalCaseResult,
     EvalReport,
     EvalSet,
+    ExpectedShape,
 )
 from app.registry.eval_runner.interface import EvalRunner
 from app.registry.eval_runner.impl import EvalRunnerImpl
 from app.registry.eval_runner.loader import load_eval_set, load_eval_sets
+from app.registry.eval_runner.multi_agent_runner import MultiAgentEvalRunnerImpl
 
 __all__ = [
     "EvalCase",
@@ -19,7 +21,9 @@ __all__ = [
     "EvalReport",
     "EvalRunner",
     "EvalRunnerImpl",
+    "MultiAgentEvalRunnerImpl",
     "EvalSet",
+    "ExpectedShape",
     "load_eval_set",
     "load_eval_sets",
 ]

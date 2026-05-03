@@ -37,6 +37,30 @@ class ExpectedShape(BaseModel):
         default_factory=lambda: ["type_adapters_needed"],
         description="Issue kinds allowed without failing the case",
     )
+    # ---- V2.1.0 multi-agent fields (Phase 7) ----
+    # These are honored by MultiAgentEvalRunner; ignored by single-agent runner.
+    classify_industry: str | None = Field(
+        default=None, description="Expected IndustryClassification.industry_code"
+    )
+    classify_scenario: str | None = Field(
+        default=None, description="Expected business_scenario substring match"
+    )
+    classify_is_multi_agent: bool | None = Field(
+        default=None, description="Expected IndustryClassification.is_multi_agent"
+    )
+    min_specialists: int | None = Field(
+        default=None, description="Multi-agent: minimum specialist count"
+    )
+    max_specialists: int | None = Field(
+        default=None, description="Multi-agent: maximum specialist count"
+    )
+    min_handoffs: int | None = Field(
+        default=None, description="Multi-agent: minimum handoff edge count"
+    )
+    require_compose_ok: bool = Field(
+        default=False,
+        description="Multi-agent: Composer must produce ast.parse-able Python",
+    )
 
 
 class EvalCase(BaseModel):
@@ -72,6 +96,13 @@ class EvalCaseResult(BaseModel):
     actual_issues: list[dict] = Field(default_factory=list)
     elapsed_ms: int = 0
     error: str | None = None
+    # ---- V2.1.0 multi-agent fields ----
+    actual_industry: str | None = None
+    actual_scenario: str | None = None
+    actual_is_multi_agent: bool | None = None
+    actual_specialists: int | None = None
+    actual_handoffs: int | None = None
+    compose_ok: bool | None = None
 
 
 class EvalReport(BaseModel):
