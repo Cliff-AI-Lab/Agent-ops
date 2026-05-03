@@ -219,3 +219,75 @@ async def get_artifact(session_id: str) -> dict:
         "artifact_path": str(path),
         "content": path.read_text(encoding="utf-8"),
     }
+
+
+# ---- V2.1.0+: Phase 7 stateless build endpoint via Switcher ---------------
+
+
+class BuildRequest(BaseModel):
+    """Request body for /api/factory/build (Phase 7)."""
+
+    nl: str
+    deploy: bool = False  # if True, multi-agent path writes artifact to disk
+
+
+@router.post("/build")
+async def build_auto(req: BuildRequest) -> dict:
+    """Stateless NL -> single OR multi-agent system, returns synchronously.
+
+    Unlike /start (which creates a 6-Gate session), this is a one-shot pipeline.
+    Routes via FactorySwitcher: single LLM classify decides single vs multi.
+
+    Returns:
+      {
+        "path": "single" | "multi",
+        "classification": {...},
+        single path: {goal, target, asset_ids, outputs: {dify, n8n}, validation, ...},
+        multi path:  {system_slug, source_code, spec: {...}, deployed_files?: {...}}
+      }
+    """
+    if not req.nl or not req.nl.strip():
+        raise HTTPException(status_code=400, detail="nl cannot be empty")
+
+    from app.core.pipelines.factory.multi_agent_pipeline import (
+        MultiAgentFactoryPipeline,
+    )
+    from app.core.pipelines.factory.switcher import FactorySwitcher
+
+    single = _build_pipeline()
+    switcher = FactorySwitcher(single_pipeline=single)
+    try:
+        result = await switcher.build(req.nl)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if req.deploy and result["path"] == "multi":
+        deploy_root = _atoms_dir().parent / "agents" / "__generated__" / "multi_agent"
+        deploy_root.mkdir(parents=True, exist_ok=True)
+        multi = MultiAgentFactoryPipeline()
+        paths = multi.deploy(result, deploy_root)
+        result["deployed_files"] = {k: str(v) for k, v in paths.items()}
+
+    # Serialize Pydantic objects to dicts for JSON response
+    payload: dict = {
+        "path": result["path"],
+        "classification": result["classification"].model_dump(),
+    }
+    if result["path"] == "multi":
+        payload["system_slug"] = result["system_slug"]
+        payload["source_code"] = result["source_code"]
+        payload["spec"] = result["spec"].model_dump()
+        if "deployed_files" in result:
+            payload["deployed_files"] = result["deployed_files"]
+    else:
+        payload["goal"] = result["intent"].goal
+        payload["target"] = result["dag"].target
+        payload["node_count"] = len(result["dag"].nodes)
+        payload["asset_ids"] = [n.asset_id for n in result["dag"].nodes]
+        payload["outputs"] = result.get("outputs", {})
+        # Optional: include trigger / validation if present
+        if "validation" in result:
+            payload["validation"] = result["validation"]
+    return payload

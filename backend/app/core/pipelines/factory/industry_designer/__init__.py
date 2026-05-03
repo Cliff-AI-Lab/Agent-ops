@@ -8,10 +8,16 @@ from app.core.pipelines.factory.industry_designer.general import (
     _agent_class_for_scenario,
     _default_guardrails,
 )
+from app.core.pipelines.factory.industry_designer.registry import (
+    DesignerRegistry,
+    default_registry,
+)
 
 __all__ = [
     "IndustryDesigner",
     "GeneralDesigner",
+    "DesignerRegistry",
+    "default_registry",
     "_agent_class_for_scenario",
     "_default_guardrails",
 ]

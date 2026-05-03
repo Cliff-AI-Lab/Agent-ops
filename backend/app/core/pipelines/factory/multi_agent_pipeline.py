@@ -32,7 +32,12 @@ from app.core.pipelines.factory.industry import (
     IndustryRouter,
     IndustryRouterImpl,
 )
-from app.core.pipelines.factory.industry_designer import GeneralDesigner, IndustryDesigner
+from app.core.pipelines.factory.industry_designer import (
+    DesignerRegistry,
+    GeneralDesigner,
+    IndustryDesigner,
+    default_registry,
+)
 from app.core.pipelines.factory.ir.multi_agent import MultiAgentSpec
 from app.core.pipelines.factory.multi_agent_composer import (
     MultiAgentComposer,
@@ -70,19 +75,38 @@ class MultiAgentFactoryPipeline:
         self,
         router: Optional[IndustryRouter] = None,
         designer: Optional[IndustryDesigner] = None,
+        designer_registry: Optional[DesignerRegistry] = None,
         composer: Optional[MultiAgentComposer] = None,
         llm_client: Optional[LLMClient] = None,
         model_router: Optional[ModelRouter] = None,
         prompts: Optional[dict] = None,
         atoms: Optional[dict] = None,
     ) -> None:
+        """
+        designer / designer_registry are mutually exclusive:
+          - designer: pin to one specific Designer (legacy V2.1.0 W1 behavior)
+          - designer_registry: dispatch by classification.industry_code (V2.1.0 W3+)
+          - both None: build default_registry() (only GeneralDesigner registered)
+        """
+        if designer is not None and designer_registry is not None:
+            raise ValueError(
+                "pass either designer (pinned) or designer_registry (dispatch); not both"
+            )
+
         shared_router = model_router or ModelRouter()
         self._router = router or IndustryRouterImpl(
             llm_client=llm_client, model_router=shared_router
         )
-        self._designer = designer or GeneralDesigner(
-            llm_client=llm_client, model_router=shared_router
-        )
+
+        # Designer dispatch
+        self._pinned_designer = designer
+        if designer is None and designer_registry is None:
+            self._designer_registry = default_registry(
+                llm_client=llm_client, model_router=shared_router
+            )
+        else:
+            self._designer_registry = designer_registry  # may be None if pinned
+
         # Composer is pure-template, no LLM needed; takes optional dicts.
         self._composer = composer or OpenAIAgentsSDKComposerImpl(
             prompts=prompts, atoms=atoms
@@ -126,7 +150,13 @@ class MultiAgentFactoryPipeline:
                 f"Use FactoryPipeline for single-agent NL."
             )
 
-        spec: MultiAgentSpec = await self._designer.design_multi_agent(nl, classification)
+        # Designer selection: pinned > registry-by-industry-code
+        if self._pinned_designer is not None:
+            designer = self._pinned_designer
+        else:
+            designer = self._designer_registry.get(classification.industry_code)
+
+        spec: MultiAgentSpec = await designer.design_multi_agent(nl, classification)
         source_code: str = self._composer.compile(spec)
 
         emit(

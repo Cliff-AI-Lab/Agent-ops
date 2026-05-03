@@ -1,0 +1,132 @@
+asset_id: ES-002
+type: eval_set
+version: 1.0.0
+name: 多智能体系统评测集 (V2.1.0)
+description: |
+  Phase 7 multi-agent path 评测集. 每个 case 描述一个 NL 输入，
+  期望 IndustryRouter 判定 is_multi_agent=True，Designer 产出符合行业 +
+  场景的 MultiAgentSpec，Composer 输出可 ast.parse 的 Python 源码。
+
+  与 ES-001 单工作流评测互补；ES-002 验证 Phase 7 端到端正确性，包括
+  行业分类、specialist 数量、guardrail 注入、Composer AST 校验等。
+
+mvp_pass_threshold: 0.70  # MVP 验收 70%
+ga_pass_threshold: 0.80   # GA 验收 80%
+
+cases:
+  # ------ 通用客服家族（航司客服等价） ------
+
+  - case_id: m01-airline-customer-service
+    description: 航司客服（cs-agents-demo 等价）
+    nl: 做一个航司客服系统，包含订票、退票、选座、行李 FAQ、补偿处理多个专员
+    expected:
+      classify_industry: "01"
+      classify_scenario: 客服
+      classify_is_multi_agent: true
+      min_specialists: 3
+      max_specialists: 7
+      require_compose_ok: true
+    tags: [v2.1, cs, customer_service, airline]
+
+  - case_id: m02-ecommerce-customer-service
+    description: 电商客服多专员（订单 / 退换货 / 客诉）
+    nl: 给电商平台做客服系统，需要订单查询、退换货处理、投诉升级三个专员协作
+    expected:
+      classify_industry: "01"
+      classify_scenario: 客服
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, cs, ecommerce]
+
+  - case_id: m03-saas-tier-support
+    description: SaaS 三层技术支持
+    nl: SaaS 产品三层技术支持，包含一线快速答疑、二线深度排查、三线工程师上报，FAQ 兜底
+    expected:
+      classify_industry: "01"
+      classify_scenario: 客服
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, cs, saas]
+
+  # ------ 金融行业 ------
+
+  - case_id: m04-finance-loan-application
+    description: 银行贷款申请多专员（资料审核 + 信用评估 + 风控复核）
+    nl: 银行贷款申请处理系统：资料审核员核实材料，信用评估员算评分，风控员复核高风险案件
+    expected:
+      classify_industry: "02"
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, finance, loan]
+
+  - case_id: m05-insurance-claim
+    description: 保险理赔多专员协作
+    nl: 保险理赔系统：理赔申请受理、医疗审核、欺诈调查、赔付计算四个专员协作处理
+    expected:
+      classify_industry: "02"
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, finance, insurance]
+
+  # ------ 医疗行业 ------
+
+  - case_id: m06-hospital-triage
+    description: 医院导诊台
+    nl: 医院导诊系统：分诊护士初判，再分流到内科、外科、儿科、急诊四个专科咨询
+    expected:
+      classify_industry: "06"
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, medical, triage]
+
+  # ------ 教育行业 ------
+
+  - case_id: m07-education-tutoring
+    description: 在线教育多学科答疑
+    nl: 在线教育答疑系统，按学科路由：数学、英语、物理、化学四个学科答疑专员
+    expected:
+      classify_industry: "07"
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, education, tutoring]
+
+  # ------ 政务行业 ------
+
+  - case_id: m08-government-service
+    description: 政务热线多部门联动
+    nl: 12345 政务热线：转人工后路由到城建、环保、社保、市场监管四个部门专员
+    expected:
+      classify_industry: "08"
+      classify_is_multi_agent: true
+      min_specialists: 3
+      require_compose_ok: true
+    tags: [v2.1, government, hotline]
+
+  # ------ 边界 / 鲁棒性 ------
+
+  - case_id: m09-minimal-multi-agent
+    description: 最小多专员（仅 2 个 specialist）
+    nl: 做一个简单的客服系统，只需要 FAQ 和投诉两个专员
+    expected:
+      classify_is_multi_agent: true
+      min_specialists: 2
+      max_specialists: 4
+      require_compose_ok: true
+    tags: [v2.1, edge, minimal]
+
+  - case_id: m10-handoff-rich
+    description: 频繁交接的客服系统
+    nl: 做一个金融客服系统，包含开户、查询、理财、投诉、转账多个专员，他们之间可以相互转交用户
+    expected:
+      classify_industry: "02"
+      classify_is_multi_agent: true
+      min_specialists: 4
+      min_handoffs: 3
+      require_compose_ok: true
+    tags: [v2.1, finance, handoff]
