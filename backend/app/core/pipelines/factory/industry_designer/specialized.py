@@ -214,3 +214,249 @@ class RetailDesigner(_IndustrySpecializedDesigner):
             description="Active shopping cart reference",
         ),
     ]
+
+
+class ManufacturingDesigner(_IndustrySpecializedDesigner):
+    """Industry 03 - 制造（重工 / 电子）.
+
+    Guardrails: compliance (safety standards refusal).
+    Shared context: work_order_id / equipment_id / shift.
+    """
+
+    industry_code = "03"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="compliance",
+            description="Refuse to give safety-critical instructions; defer to certified safety engineer for any process change recommendation",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="work_order_id",
+            type="string",
+            description="Active work order reference",
+        ),
+        SharedContextField(
+            name="equipment_id",
+            type="string",
+            description="Equipment / production line identifier",
+        ),
+        SharedContextField(
+            name="shift",
+            type="string",
+            description="Current shift (morning / afternoon / night)",
+        ),
+    ]
+
+
+class EnergyDesigner(_IndustrySpecializedDesigner):
+    """Industry 04 - 能源（电力 / 油气）.
+
+    Guardrails: compliance (safety + grid stability).
+    Shared context: facility_id / outage_id.
+    """
+
+    industry_code = "04"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="compliance",
+            description="Refuse to recommend changes that could affect grid stability or production safety; always require human dispatcher approval",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="facility_id",
+            type="string",
+            description="Power station / pipeline facility identifier",
+        ),
+        SharedContextField(
+            name="outage_id",
+            type="string",
+            description="Active outage / maintenance event reference",
+        ),
+    ]
+
+
+class TransportationDesigner(_IndustrySpecializedDesigner):
+    """Industry 05 - 交通（物流 / 航运）.
+
+    Shared context: shipment_id / vehicle_id / route_id / customer_id.
+    """
+
+    industry_code = "05"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="pii",
+            description="Mask consignee phone and full address; only show masked summaries unless user explicitly asks for shipment-specific detail",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="shipment_id",
+            type="string",
+            description="Shipment / waybill identifier",
+        ),
+        SharedContextField(
+            name="vehicle_id",
+            type="string",
+            description="Vehicle / vessel identifier",
+        ),
+        SharedContextField(
+            name="route_id",
+            type="string",
+            description="Route / lane reference",
+        ),
+        SharedContextField(
+            name="customer_id",
+            type="string",
+            description="Shipper / consignee identifier",
+        ),
+    ]
+
+
+class EducationDesigner(_IndustrySpecializedDesigner):
+    """Industry 07 - 教育（高校 / K12）.
+
+    Guardrails: PII (FERPA-style for student data) + relevance.
+    Shared context: student_id / class_id / term.
+    """
+
+    industry_code = "07"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="pii",
+            description="FERPA-aligned student data handling: never echo full student names or grades publicly; redact transcripts before sharing",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="student_id",
+            type="string",
+            description="Student identifier (masked in output)",
+        ),
+        SharedContextField(
+            name="class_id",
+            type="string",
+            description="Course / class section reference",
+        ),
+        SharedContextField(
+            name="term",
+            type="string",
+            description="Academic term (e.g. 2026-Spring)",
+        ),
+    ]
+
+
+class MediaDesigner(_IndustrySpecializedDesigner):
+    """Industry 10 - 媒体文娱（出版 / 内容平台）.
+
+    Guardrails: compliance (content moderation) + relevance.
+    Shared context: content_id / creator_id / publication_status.
+    """
+
+    industry_code = "10"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="compliance",
+            description="Content moderation: refuse to generate content that violates platform policies (violence / explicit / disinfo); flag for human review when uncertain",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="content_id",
+            type="string",
+            description="Article / video / asset identifier",
+        ),
+        SharedContextField(
+            name="creator_id",
+            type="string",
+            description="Content creator identifier",
+        ),
+        SharedContextField(
+            name="publication_status",
+            type="string",
+            description="draft / review / published / archived",
+        ),
+    ]
+
+
+class TelecomDesigner(_IndustrySpecializedDesigner):
+    """Industry 11 - 通信（运营商）.
+
+    Guardrails: PII (mask phone numbers / IMSI / billing).
+    Shared context: subscriber_id / msisdn / service_id / ticket_id.
+    """
+
+    industry_code = "11"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="pii",
+            description="Mask phone numbers (MSISDN), IMSI, and billing identifiers; only show last 4 digits in any output",
+            blocking=True,
+        ),
+        GuardrailSpec(
+            kind="compliance",
+            description="Refuse to provide call detail records (CDR) or location data without proper authorization; require ticket reference for any data access",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="subscriber_id",
+            type="string",
+            description="Telecom subscriber identifier",
+        ),
+        SharedContextField(
+            name="msisdn",
+            type="string",
+            description="Phone number (masked in output)",
+        ),
+        SharedContextField(
+            name="service_id",
+            type="string",
+            description="Service plan / product reference",
+        ),
+        SharedContextField(
+            name="ticket_id",
+            type="string",
+            description="Trouble ticket / support case reference",
+        ),
+    ]
+
+
+class SmartCityDesigner(_IndustrySpecializedDesigner):
+    """Industry 12 - 智慧城市（园区 / 城市运营）.
+
+    Shared context: incident_id / district_id / sensor_id.
+    """
+
+    industry_code = "12"
+    extra_guardrails = [
+        GuardrailSpec(
+            kind="compliance",
+            description="Refuse to make autonomous decisions that affect public safety (traffic / emergency dispatch); always loop in human operator",
+            blocking=True,
+        ),
+    ]
+    extra_shared_context = [
+        SharedContextField(
+            name="incident_id",
+            type="string",
+            description="City incident / event reference",
+        ),
+        SharedContextField(
+            name="district_id",
+            type="string",
+            description="Administrative district / park zone identifier",
+        ),
+        SharedContextField(
+            name="sensor_id",
+            type="string",
+            description="IoT sensor identifier (if applicable)",
+        ),
+    ]

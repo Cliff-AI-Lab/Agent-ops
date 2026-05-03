@@ -76,16 +76,33 @@ def default_registry(
     """
     # Imports here to avoid circular reference at module load time
     from app.core.pipelines.factory.industry_designer.specialized import (
+        EducationDesigner,
+        EnergyDesigner,
         FinanceDesigner,
         GovernmentDesigner,
+        ManufacturingDesigner,
+        MediaDesigner,
         MedicalDesigner,
         RetailDesigner,
+        SmartCityDesigner,
+        TelecomDesigner,
+        TransportationDesigner,
     )
 
     reg = DesignerRegistry(default_industry_code="01")
     reg.register(GeneralDesigner(llm_client=llm_client, model_router=model_router))
-    reg.register(FinanceDesigner(llm_client=llm_client, model_router=model_router))
-    reg.register(MedicalDesigner(llm_client=llm_client, model_router=model_router))
-    reg.register(GovernmentDesigner(llm_client=llm_client, model_router=model_router))
-    reg.register(RetailDesigner(llm_client=llm_client, model_router=model_router))
+    for cls in (
+        FinanceDesigner,
+        ManufacturingDesigner,
+        EnergyDesigner,
+        TransportationDesigner,
+        MedicalDesigner,
+        EducationDesigner,
+        GovernmentDesigner,
+        RetailDesigner,
+        MediaDesigner,
+        TelecomDesigner,
+        SmartCityDesigner,
+    ):
+        reg.register(cls(llm_client=llm_client, model_router=model_router))
     return reg

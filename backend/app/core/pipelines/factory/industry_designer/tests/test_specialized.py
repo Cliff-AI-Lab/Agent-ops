@@ -174,12 +174,68 @@ def test_default_registry_includes_all_v210_w3_designers():
     assert isinstance(reg.get("09"), RetailDesigner)
 
 
-def test_default_registry_falls_back_to_general_for_unshipped_industry():
-    """E.g., 03 制造 not yet shipped -> falls back to GeneralDesigner."""
-    from app.core.pipelines.factory.industry_designer import GeneralDesigner
+def test_default_registry_all_12_industries_resolve():
+    """V2.1.0 W3 ships all 11 specialized + General; every code 01..12 returns
+    a non-None Designer (specialized for shipped, General for any future gap)."""
+    from app.core.pipelines.factory.industry_designer import (
+        EducationDesigner,
+        EnergyDesigner,
+        ManufacturingDesigner,
+        MediaDesigner,
+        SmartCityDesigner,
+        TelecomDesigner,
+        TransportationDesigner,
+    )
 
     reg = default_registry()
-    designer = reg.get("03")
-    assert isinstance(designer, GeneralDesigner)
-    # Make sure it's NOT one of the specialized (i.e. not Finance/Medical/etc.)
-    assert not isinstance(designer, FinanceDesigner)
+    expected_specialized = {
+        "02": FinanceDesigner,
+        "03": ManufacturingDesigner,
+        "04": EnergyDesigner,
+        "05": TransportationDesigner,
+        "06": MedicalDesigner,
+        "07": EducationDesigner,
+        "08": GovernmentDesigner,
+        "09": RetailDesigner,
+        "10": MediaDesigner,
+        "11": TelecomDesigner,
+        "12": SmartCityDesigner,
+    }
+    for code, expected_cls in expected_specialized.items():
+        designer = reg.get(code)
+        assert isinstance(designer, expected_cls), (
+            f"industry {code} expected {expected_cls.__name__} got {type(designer).__name__}"
+        )
+    # 01 General
+    from app.core.pipelines.factory.industry_designer import GeneralDesigner
+    assert type(reg.get("01")).__name__ == "GeneralDesigner"
+
+
+@pytest.mark.asyncio
+async def test_telecom_double_guardrails():
+    """Telecom has 2 industry-specific guardrails (pii + compliance)."""
+    from app.core.pipelines.factory.industry_designer import TelecomDesigner
+    designer = _make_mock(TelecomDesigner)
+    spec = await designer.design_multi_agent(
+        "做一个运营商客服系统包含 A B 两个专员", _classification("11", "运营商客服")
+    )
+    kinds = [g.kind for g in spec.guardrails]
+    # Two of each are normal: relevance + jailbreak (general) + pii + compliance (telecom)
+    assert kinds.count("pii") == 1
+    assert kinds.count("compliance") == 1
+    names = {c.name for c in spec.shared_context}
+    assert {"subscriber_id", "msisdn", "service_id", "ticket_id"}.issubset(names)
+
+
+@pytest.mark.asyncio
+async def test_manufacturing_safety_compliance():
+    from app.core.pipelines.factory.industry_designer import ManufacturingDesigner
+    designer = _make_mock(ManufacturingDesigner)
+    spec = await designer.design_multi_agent(
+        "做一个工厂运维多专员系统 A B", _classification("03", "工厂运维")
+    )
+    compliance = [g for g in spec.guardrails if g.kind == "compliance"]
+    assert len(compliance) >= 1
+    assert "safety" in compliance[0].description.lower() or "safety-critical" in compliance[0].description
+    names = {c.name for c in spec.shared_context}
+    assert {"work_order_id", "equipment_id", "shift"}.issubset(names)
