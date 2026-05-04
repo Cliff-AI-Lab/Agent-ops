@@ -149,6 +149,22 @@ async def _run_eval_multi(eval_set_id: str | None, only_case: str | None) -> Any
             f"eval_set {target_id} not found; available: {list(sets)}"
         )
     es = sets[target_id]
+
+    # P3: eval-multi only supports multi-agent eval sets.
+    # Heuristic: at least one case must declare classify_is_multi_agent or
+    # min_specialists; otherwise this set is for single-agent (use 'factory eval').
+    is_multi_agent_set = any(
+        c.expected.classify_is_multi_agent is not None
+        or c.expected.min_specialists is not None
+        for c in es.cases
+    )
+    if not is_multi_agent_set:
+        raise ValueError(
+            f"eval set {target_id!r} has no multi-agent expectations "
+            f"(no classify_is_multi_agent / min_specialists in any case). "
+            f"Use 'factory eval' for single-agent eval sets like ES-001."
+        )
+
     if only_case:
         es = es.model_copy(
             update={"cases": [c for c in es.cases if c.case_id == only_case]}
@@ -393,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "eval-multi":
         try:
             report = asyncio.run(_run_eval_multi(args.set, args.only))
-        except (FileNotFoundError, KeyError) as exc:
+        except (FileNotFoundError, KeyError, ValueError) as exc:
             print(f"[factory] config error: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # noqa: BLE001
@@ -403,7 +419,9 @@ def main(argv: list[str] | None = None) -> int:
             print(report.model_dump_json(indent=2))
         else:
             _human_eval_multi_print(report)
-        if not report.is_mvp_threshold_met:
+        # ES-002 is the V2.1.0 GA gate — must hit GA threshold (80%), not MVP (70%).
+        # P1 fix per codex review 2026-05-05.
+        if not report.is_ga_threshold_met:
             return 3
         return 0
 

@@ -40,7 +40,15 @@ class ExpectedShape(BaseModel):
     # ---- V2.1.0 multi-agent fields (Phase 7) ----
     # These are honored by MultiAgentEvalRunner; ignored by single-agent runner.
     classify_industry: str | None = Field(
-        default=None, description="Expected IndustryClassification.industry_code"
+        default=None, description="Expected IndustryClassification.industry_code (single value)"
+    )
+    allowed_industry_codes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Multi-valued industry whitelist. If non-empty, actual industry must be IN this set. "
+            "Use when LLM legitimately could classify into multiple correct industries "
+            "(e.g. airline -> 01 通用 OR 05 交通)."
+        ),
     )
     classify_scenario: str | None = Field(
         default=None, description="Expected business_scenario substring match"

@@ -138,6 +138,12 @@ class MultiAgentEvalRunnerImpl:
                 f"industry {actual_industry!r} != expected {exp.classify_industry!r}"
             )
 
+        if exp.allowed_industry_codes and actual_industry not in exp.allowed_industry_codes:
+            passed = False
+            reasons.append(
+                f"industry {actual_industry!r} not in allowed {exp.allowed_industry_codes!r}"
+            )
+
         if exp.classify_scenario is not None:
             if not actual_scenario or exp.classify_scenario not in actual_scenario:
                 passed = False
