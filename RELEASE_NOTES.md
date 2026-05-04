@@ -1,5 +1,58 @@
 # Agent Ops — Release Notes
 
+## V2.0.8 — 2026-05-04 · Phase 7 W3 complete  12-industry Designer roster
+
+> 11 个 industry-specialized Designer 批量上线 + 1 个 GeneralDesigner = 12 行业全覆盖。
+> Phase 7 W3 完成；下一步 W4 真 LLM ES-002 GA 验证 + World 前端集成。
+
+### 12 行业 Designer 名单
+
+| 行业 | Designer | industry_code | 关键特性 |
+|---|---|---|---|
+| 01 通用 | GeneralDesigner | 01 | 默认 fallback |
+| 02 金融 | FinanceDesigner | 02 | KYC/AML compliance + PII（mask account #） |
+| 03 制造 | ManufacturingDesigner | 03 | 安全合规拒绝 + work_order/equipment/shift |
+| 04 能源 | EnergyDesigner | 04 | 电网稳定合规 + facility/outage |
+| 05 交通 | TransportationDesigner | 05 | 收发件人 PII + shipment/vehicle/route |
+| 06 医疗 | MedicalDesigner | 06 | HIPAA-aligned PII + 拒诊断合规 |
+| 07 教育 | EducationDesigner | 07 | FERPA-aligned PII + student/class/term |
+| 08 政务 | GovernmentDesigner | 08 | 身份证 PII + 信息性合规 |
+| 09 零售 | RetailDesigner | 09 | 信用卡/地址 PII + customer/order/cart |
+| 10 媒体文娱 | MediaDesigner | 10 | 内容审核 compliance |
+| 11 通信 | TelecomDesigner | 11 | 双 guardrail（PII + CDR 合规） |
+| 12 智慧城市 | SmartCityDesigner | 12 | 公共安全 human-loop |
+
+### 共用基类设计
+
+`_IndustrySpecializedDesigner(GeneralDesigner)`：
+- 子类只声明 `extra_guardrails` + `extra_shared_context` 类属性
+- `design_multi_agent` 调父类后注入特化字段（去重 by kind/name）
+- 注入后再跑 `validate_graph()` 防御性校验
+- **零 LLM 成本开销** — 纯元数据增强
+
+### 核心审计
+
+```
+[PASS] 0 emoji（all 12 industry Designers）
+[PASS] 0 hardcoded model names
+[PASS] 12/12 industry codes covered
+```
+
+### 测试
+
+```
+458 (V2.0.7)  →  470 (V2.0.8) + 1 skipped
++12 industry Designer tests (industry codes / guardrails / shared context / fallback / no duplicate)
+```
+
+### V2.1.0 W4 待做
+
+- 真 LLM 跑 ES-002 GA pass rate（≥80% 验收）
+- World 创作者中心 `/api/factory/build` 集成
+- HTTP 端点真访问测试（uvicorn 起 + curl）
+
+---
+
 ## V2.0.7 — 2026-05-02 · Phase 7 W3 prep (dispatch + HTTP + multi-agent eval)
 
 > Phase 7 W2 收尾 + W3 启动准备：行业 Designer 调度基础设施 + HTTP API 接入 +

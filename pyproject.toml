@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.7"
-description = "Agent Ops V2.0.7 — Phase 7 W3 prep. DesignerRegistry (industry dispatch) + HTTP /api/factory/build (stateless Switcher) + ES-002 multi-agent eval (10 cases) + MultiAgentEvalRunnerImpl. 458 tests."
+version = "2.0.8"
+description = "Agent Ops V2.0.8 — Phase 7 W3 complete. All 12 industry Designers shipped (Finance/Manufacturing/Energy/Transportation/Medical/Education/Government/Retail/Media/Telecom/SmartCity + General). Industry-specific guardrails (compliance/PII) + shared_context (customer/patient/citizen IDs) auto-injected per classification.industry_code. 470 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
