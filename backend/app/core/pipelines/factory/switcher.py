@@ -22,6 +22,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from app.core.governance import (
+    CostBudget,
+    CostBudgetExceeded,
+    CostEstimator,
+)
 from app.core.llm.client import LLMClient
 from app.core.llm.model_router import ModelRouter
 from app.core.pipelines.factory.industry import (
@@ -44,11 +49,18 @@ class FactorySwitcher:
         router: Optional[IndustryRouter] = None,
         llm_client: Optional[LLMClient] = None,
         model_router: Optional[ModelRouter] = None,
+        cost_estimator: Optional[CostEstimator] = None,
+        cost_budget: Optional[CostBudget] = None,
     ) -> None:
         """All sub-components injectable. Defaults wire V2.1.0 W1+W2 impls.
 
         Note: when both single_pipeline and multi_pipeline are supplied, their
         internal routers are NOT used; Switcher's own router is the source of truth.
+
+        cost_estimator + cost_budget are V2.2 governance gate (optional). When
+        BOTH supplied, Switcher runs a pre-flight cost estimate and refuses the
+        build (raises CostBudgetExceeded) if the estimate exceeds the budget.
+        Either alone disables the gate.
         """
         shared_model_router = model_router or ModelRouter()
         self._router = router or IndustryRouterImpl(
@@ -59,6 +71,9 @@ class FactorySwitcher:
         self._multi = multi_pipeline
         self._llm = llm_client
         self._shared_router = shared_model_router
+        # Cost gate (V2.2): only active when BOTH estimator and budget supplied
+        self._cost_estimator = cost_estimator
+        self._cost_budget = cost_budget
 
     async def build(self, nl: str) -> dict[str, Any]:
         if not nl or not nl.strip():
@@ -74,6 +89,18 @@ class FactorySwitcher:
             f"industry={classification.industry_code}",
             data={"path": "multi" if classification.is_multi_agent else "single"},
         )
+
+        # V2.2 governance gate: pre-flight cost estimate (post-classify so we
+        # know which path's cost to estimate, but pre-build so we don't waste
+        # the bigger LLM calls if the budget refuses).
+        if self._cost_estimator is not None and self._cost_budget is not None:
+            if classification.is_multi_agent:
+                estimate = self._cost_estimator.estimate_multi(nl)
+            else:
+                estimate = self._cost_estimator.estimate_single(nl)
+            decision = self._cost_budget.check(estimate)
+            if not decision.approved:
+                raise CostBudgetExceeded(decision)
 
         if classification.is_multi_agent:
             multi = self._multi or MultiAgentFactoryPipeline(

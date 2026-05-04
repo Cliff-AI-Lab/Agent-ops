@@ -214,6 +214,92 @@ async def test_single_path_without_pipeline_raises():
 # ---- contract: multi result has no nested 'classification' duplicate -------
 
 
+# ---- V2.2 cost gate -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cost_gate_blocks_build_over_budget():
+    """When cost_estimator + cost_budget supplied and estimate > budget, raise."""
+    from app.core.governance import (
+        CostBudgetExceeded,
+        HeuristicCostEstimator,
+        ThresholdCostBudget,
+    )
+
+    llm = MagicMock()
+    llm.chat = AsyncMock(
+        return_value=ChatMessage(
+            role="assistant",
+            content=json.dumps(_classification_multi_payload()),
+        )
+    )
+    model_router = MagicMock()
+    model_router.resolve = MagicMock(return_value="test-model")
+
+    switcher = FactorySwitcher(
+        llm_client=llm,
+        model_router=model_router,
+        cost_estimator=HeuristicCostEstimator(),
+        cost_budget=ThresholdCostBudget(threshold_cny=0.001),  # absurdly low
+    )
+    with pytest.raises(CostBudgetExceeded) as exc_info:
+        await switcher.build("做一个客服多 agent 系统")
+    assert exc_info.value.decision.approved is False
+    # Only 1 LLM call (classify) used before refusal — designer never invoked
+    assert llm.chat.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cost_gate_passes_under_budget():
+    """When estimate fits budget, build proceeds normally."""
+    from app.core.governance import HeuristicCostEstimator, ThresholdCostBudget
+
+    llm = MagicMock()
+    llm.chat = AsyncMock(
+        side_effect=[
+            ChatMessage(role="assistant", content=json.dumps(_classification_multi_payload())),
+            ChatMessage(role="assistant", content=json.dumps(_designer_payload())),
+        ]
+    )
+    model_router = MagicMock()
+    model_router.resolve = MagicMock(return_value="test-model")
+
+    switcher = FactorySwitcher(
+        llm_client=llm,
+        model_router=model_router,
+        cost_estimator=HeuristicCostEstimator(),
+        cost_budget=ThresholdCostBudget(threshold_cny=10.00),  # plenty
+    )
+    result = await switcher.build("做一个客服多 agent 系统")
+    assert result["path"] == "multi"
+    assert llm.chat.call_count == 2  # classify + designer extract, both made it through
+
+
+@pytest.mark.asyncio
+async def test_cost_gate_skipped_when_only_estimator_supplied():
+    """Estimator alone (no budget) does NOT gate the build."""
+    from app.core.governance import HeuristicCostEstimator
+
+    llm = MagicMock()
+    llm.chat = AsyncMock(
+        side_effect=[
+            ChatMessage(role="assistant", content=json.dumps(_classification_multi_payload())),
+            ChatMessage(role="assistant", content=json.dumps(_designer_payload())),
+        ]
+    )
+    model_router = MagicMock()
+    model_router.resolve = MagicMock(return_value="test-model")
+
+    switcher = FactorySwitcher(
+        llm_client=llm,
+        model_router=model_router,
+        cost_estimator=HeuristicCostEstimator(),
+        # no cost_budget
+    )
+    result = await switcher.build("做一个客服多 agent 系统")
+    assert result["path"] == "multi"
+
+
 @pytest.mark.asyncio
 async def test_multi_result_classification_at_top_level_only():
     """Switcher's multi result has classification once (not nested under another key)."""

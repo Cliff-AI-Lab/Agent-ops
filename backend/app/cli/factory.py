@@ -259,8 +259,13 @@ def _human_eval_print(report: Any) -> None:
                 print(f"    -> {reason}")
 
 
-async def _run_build_auto(nl: str, deploy_dir: Path | None) -> dict[str, Any]:
-    """V2.1.0+ Phase 7: auto-route NL between single-agent and multi-agent paths."""
+async def _run_build_auto(
+    nl: str, deploy_dir: Path | None, budget_cny: float | None = None
+) -> dict[str, Any]:
+    """V2.1.0+ Phase 7: auto-route NL between single-agent and multi-agent paths.
+
+    V2.2: optional budget_cny activates pre-flight cost gate.
+    """
     from app.core.pipelines.factory.pipeline import FactoryPipeline
     from app.core.pipelines.factory.switcher import FactorySwitcher
 
@@ -271,8 +276,19 @@ async def _run_build_auto(nl: str, deploy_dir: Path | None) -> dict[str, Any]:
             f"(set FACTORY_ATOMS_DIR or run from agent-harness root)"
         )
 
+    estimator = None
+    budget = None
+    if budget_cny is not None:
+        from app.core.governance import HeuristicCostEstimator, ThresholdCostBudget
+        estimator = HeuristicCostEstimator()
+        budget = ThresholdCostBudget(threshold_cny=budget_cny)
+
     single = FactoryPipeline(atoms_dir=atoms_dir)
-    switcher = FactorySwitcher(single_pipeline=single)
+    switcher = FactorySwitcher(
+        single_pipeline=single,
+        cost_estimator=estimator,
+        cost_budget=budget,
+    )
     result = await switcher.build(nl)
 
     if deploy_dir is not None and result["path"] == "multi":
@@ -353,6 +369,12 @@ def main(argv: list[str] | None = None) -> int:
         help="部署到目录（多智能体路径）：写 main.py + spec.json + manifest.json",
     )
     p_auto.add_argument("--json", action="store_true", help="机器可读输出（不渲染 spec object）")
+    p_auto.add_argument(
+        "--budget-cny",
+        type=float,
+        default=None,
+        help="V2.2 cost gate (CNY)：超过预估则拒绝 build（不传则不启用）",
+    )
 
     p_eval_multi = sub.add_parser(
         "eval-multi",
@@ -428,11 +450,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "build-auto":
         deploy_dir = Path(args.deploy) if args.deploy else None
         try:
-            result = asyncio.run(_run_build_auto(args.nl, deploy_dir))
+            result = asyncio.run(_run_build_auto(args.nl, deploy_dir, args.budget_cny))
         except FileNotFoundError as exc:
             print(f"[factory] config error: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # noqa: BLE001
+            from app.core.governance import CostBudgetExceeded
+            if isinstance(exc, CostBudgetExceeded):
+                print(f"[factory] budget exceeded: {exc.decision.reason}", file=sys.stderr)
+                return 5
             print(f"[factory] build-auto failed: {exc}", file=sys.stderr)
             return 4
 
