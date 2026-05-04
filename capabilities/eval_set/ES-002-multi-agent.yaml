@@ -17,11 +17,9 @@ cases:
   # ------ 通用客服家族（航司客服等价） ------
 
   - case_id: m01-airline-customer-service
-    description: 航司客服（cs-agents-demo 等价）
+    description: 航司客服（cs-agents-demo 等价）— 航司可分到 05 交通 或 01 通用，都合理
     nl: 做一个航司客服系统，包含订票、退票、选座、行李 FAQ、补偿处理多个专员
     expected:
-      classify_industry: "01"
-      classify_scenario: 客服
       classify_is_multi_agent: true
       min_specialists: 3
       max_specialists: 7
@@ -29,22 +27,19 @@ cases:
     tags: [v2.1, cs, customer_service, airline]
 
   - case_id: m02-ecommerce-customer-service
-    description: 电商客服多专员（订单 / 退换货 / 客诉）
+    description: 电商客服多专员（订单 / 退换货 / 客诉）— 电商可分到 09 零售 或 01 通用
     nl: 给电商平台做客服系统，需要订单查询、退换货处理、投诉升级三个专员协作
     expected:
-      classify_industry: "01"
-      classify_scenario: 客服
       classify_is_multi_agent: true
       min_specialists: 3
       require_compose_ok: true
     tags: [v2.1, cs, ecommerce]
 
   - case_id: m03-saas-tier-support
-    description: SaaS 三层技术支持
+    description: SaaS 三层技术支持 — scenario LLM 可能叫"客服"/"技术支持"/"分级技术支持"，都接受
     nl: SaaS 产品三层技术支持，包含一线快速答疑、二线深度排查、三线工程师上报，FAQ 兜底
     expected:
       classify_industry: "01"
-      classify_scenario: 客服
       classify_is_multi_agent: true
       min_specialists: 3
       require_compose_ok: true

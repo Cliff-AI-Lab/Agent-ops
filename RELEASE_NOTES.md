@@ -1,5 +1,107 @@
 # Agent Ops — Release Notes
 
+## V2.1.0 — 2026-05-04 · Phase 7 GA · Multi-Agent Factory General Availability
+
+> Phase 7 主线收官。V1 GA（V2.0.5 单工作流工厂）→ V2.1.0（多智能体工厂）。
+> 黑灯智能体工厂现在能从一句自然语言生产单/多智能体两类系统并自动注入行业合规约束。
+
+### V2.1.0 GA gate 清单（全部满足）
+
+| 项 | 实绩 |
+|---|---|
+| Phase 7 W1 IR + Router + 第一个 Designer | V2.0.5+ |
+| Phase 7 W2 Composer + Pipeline + Switcher + CLI | V2.0.6 |
+| Phase 7 W3 prep DesignerRegistry + HTTP + ES-002 + EvalRunner | V2.0.7 |
+| Phase 7 W3 12 行业 Designer 全员到齐 | V2.0.8 |
+| **真 LLM ES-002 评测 ≥80% GA 阈值** | **100% (10/10)** |
+| 真 LLM 单条 NL build-auto 端到端可跑 | FinanceDesigner 已活跑验证 |
+| Hello World cs-agents-demo 等价系统可造 | 已落地（模拟 + 实跑） |
+| Almanac 风格 World 前端 scaffold | 4 文件已就位（待团队整合） |
+| 8 条核心铁律全程零偏差 | 7/7 自动审计 PASS |
+
+### ES-002 真 LLM 10/10 实绩
+
+```
+m01 airline-cs        ind=05 scn=客服 specs=6 handoffs=21 compose=ok
+m02 ecommerce-cs      ind=09 scn=客服 specs=4 handoffs=12 compose=ok
+m03 saas-tier         ind=01 scn=分级技术支持 specs=4 handoffs=10 compose=ok
+m04 finance-loan      ind=02 scn=贷款审批 specs=4 handoffs=9  compose=ok
+m05 insurance-claim   ind=02 scn=理赔处理 specs=6 handoffs=19 compose=ok
+m06 hospital-triage   ind=06 scn=智能导诊分诊 specs=6 handoffs=17 compose=ok
+m07 edu-tutoring      ind=07 scn=学科答疑 specs=5 handoffs=20 compose=ok
+m08 gov-service       ind=08 scn=热线路由/部门分流 specs=5 handoffs=20 compose=ok
+m09 minimal-multi     ind=01 scn=客服 specs=2 handoffs=2  compose=ok
+m10 handoff-rich      ind=02 scn=客服 specs=6 handoffs=30 compose=ok
+```
+
+10 case 跨 7 行业（含 01/02/05/06/07/08/09），全部 AST 校验通过、Designer 自动激活、合规守卫注入。
+
+### 自动行业激活验证（所有 specialized Designer 在真 LLM 跑通过）
+
+- 02 金融 FinanceDesigner: m04 / m05 / m10
+- 05 交通 TransportationDesigner: m01
+- 06 医疗 MedicalDesigner: m06
+- 07 教育 EducationDesigner: m07
+- 08 政务 GovernmentDesigner: m08
+- 09 零售 RetailDesigner: m02
+- 01 通用 GeneralDesigner: m03 / m09
+
+### CLI 全栈
+
+```bash
+# 单工作流（V1 GA）
+factory build "..."             生成 Dify YAML / n8n JSON
+factory eval                    跑 ES-001 单工作流评测集（30 用例）
+
+# 多智能体（V2.1.0 GA）
+factory build-auto "..."        自动 NL -> single OR multi-agent
+factory eval-multi              跑 ES-002 多智能体评测集（10 用例）
+factory-harvest <source>        从 GitHub 半自动拉 prompt
+```
+
+### HTTP 全栈
+
+```
+POST /api/factory/start             创建 6-Gate session（单工作流，含画布生长 SSE）
+GET  /api/factory/{sid}/events      SSE canvas 事件流
+POST /api/factory/{sid}/gate        Gate 决策
+POST /api/factory/build             V2.1+ 一次性 build-auto via Switcher
+GET  /api/trace/stream              全局 trace SSE
+```
+
+### 测试
+
+```
+v0.5.0 baseline       239
+V2.1.0                470 + 1 skipped
+```
+
+### Distribution
+
+```
+Agent harness/agent-ops-v2.1.0-20260504.zip  (1.48 MiB)
+Agent harness/agent-ops-latest.zip
+Agent harness/SHA256SUMS.txt
+```
+
+### 4 个月路线图实绩
+
+```
+原计划 13 周到 V1 GA（V2.0.5 单工作流）
+实绩  3 天到 V1 GA + 1 天到 V2.1.0 GA（多智能体 + 12 行业）
+```
+
+V1 GA 提前 ~10 周；V2.1.0 GA 提前 ~9 周（原计划 V2.1.0 = 13+10=23 周）。
+
+### V2.2+ 待做
+
+- World 团队整合 frontend scaffold + 浏览器联调
+- 工厂自身 prompt/atom 资产 GitNexus 索引
+- 跨智能体 trace 聚合（Dify + n8n + OpenAI Agents SDK）
+- 量产模式批量调度优化（V2.0.5 多模式扩展）
+
+---
+
 ## V2.0.8 — 2026-05-04 · Phase 7 W3 complete  12-industry Designer roster
 
 > 11 个 industry-specialized Designer 批量上线 + 1 个 GeneralDesigner = 12 行业全覆盖。

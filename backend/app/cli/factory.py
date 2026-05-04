@@ -132,6 +132,62 @@ def _machine_print(result: dict[str, Any]) -> None:
     )
 
 
+async def _run_eval_multi(eval_set_id: str | None, only_case: str | None) -> Any:
+    """V2.1+ multi-agent eval (ES-002 via MultiAgentEvalRunner)."""
+    from app.core.pipelines.factory.multi_agent_pipeline import MultiAgentFactoryPipeline
+    from app.registry.eval_runner import MultiAgentEvalRunnerImpl, load_eval_sets
+
+    atoms_dir = _atoms_dir()
+    eval_dir = atoms_dir.parent / "eval_set"
+    if not eval_dir.exists():
+        raise FileNotFoundError(f"eval_set dir missing: {eval_dir}")
+
+    sets = load_eval_sets(eval_dir)
+    target_id = eval_set_id or "ES-002"
+    if target_id not in sets:
+        raise KeyError(
+            f"eval_set {target_id} not found; available: {list(sets)}"
+        )
+    es = sets[target_id]
+    if only_case:
+        es = es.model_copy(
+            update={"cases": [c for c in es.cases if c.case_id == only_case]}
+        )
+        if not es.cases:
+            raise KeyError(f"case {only_case} not found in {es.asset_id}")
+
+    pipeline = MultiAgentFactoryPipeline()
+    runner = MultiAgentEvalRunnerImpl(pipeline=pipeline)
+    return await runner.run(es)
+
+
+def _human_eval_multi_print(report: Any) -> None:
+    print(f"eval_set:  {report.eval_set_id}")
+    print(f"total:     {report.total}")
+    print(f"passed:    {report.passed}")
+    print(f"failed:    {report.failed}")
+    print(f"pass_rate: {report.pass_rate:.1%}")
+    mvp = "OK" if report.is_mvp_threshold_met else "FAIL"
+    ga = "OK" if report.is_ga_threshold_met else "FAIL"
+    print(f"MVP gate (>= 70%): {mvp}")
+    print(f"GA gate  (>= 80%): {ga}")
+    print()
+    for r in report.case_results:
+        marker = "[PASS]" if r.passed else "[FAIL]"
+        ind = r.actual_industry or "-"
+        scn = r.actual_scenario or "-"
+        spec_n = r.actual_specialists if r.actual_specialists is not None else "-"
+        ho = r.actual_handoffs if r.actual_handoffs is not None else "-"
+        compose = "ok" if r.compose_ok else ("fail" if r.compose_ok is False else "-")
+        print(
+            f"  {marker} {r.case_id:32s} ind={ind} scn={scn} "
+            f"specs={spec_n} handoffs={ho} compose={compose} ({r.elapsed_ms} ms)"
+        )
+        if not r.passed:
+            for reason in r.reasons:
+                print(f"    -> {reason}")
+
+
 async def _run_eval(eval_set_id: str | None, only_case: str | None) -> Any:
     from app.core.pipelines.factory.pipeline import FactoryPipeline
     from app.registry.eval_runner import EvalRunnerImpl, load_eval_sets
@@ -282,6 +338,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_auto.add_argument("--json", action="store_true", help="机器可读输出（不渲染 spec object）")
 
+    p_eval_multi = sub.add_parser(
+        "eval-multi",
+        help="V2.1+ 跑多智能体评测集（ES-002）via MultiAgentEvalRunner",
+    )
+    p_eval_multi.add_argument("--set", "-s", default="ES-002", help="eval_set_id; 默认 ES-002")
+    p_eval_multi.add_argument("--only", default=None, help="只跑某一 case_id")
+    p_eval_multi.add_argument("--json", action="store_true", help="机器可读输出")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
@@ -322,6 +386,23 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _human_eval_print(report)
 
+        if not report.is_mvp_threshold_met:
+            return 3
+        return 0
+
+    if args.cmd == "eval-multi":
+        try:
+            report = asyncio.run(_run_eval_multi(args.set, args.only))
+        except (FileNotFoundError, KeyError) as exc:
+            print(f"[factory] config error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] eval-multi failed: {exc}", file=sys.stderr)
+            return 4
+        if args.json:
+            print(report.model_dump_json(indent=2))
+        else:
+            _human_eval_multi_print(report)
         if not report.is_mvp_threshold_met:
             return 3
         return 0

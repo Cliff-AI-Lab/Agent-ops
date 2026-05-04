@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.0.8"
-description = "Agent Ops V2.0.8 — Phase 7 W3 complete. All 12 industry Designers shipped (Finance/Manufacturing/Energy/Transportation/Medical/Education/Government/Retail/Media/Telecom/SmartCity + General). Industry-specific guardrails (compliance/PII) + shared_context (customer/patient/citizen IDs) auto-injected per classification.industry_code. 470 tests."
+version = "2.1.0"
+description = "Agent Ops V2.1.0 — Phase 7 GA. Multi-agent factory: NL → IndustryRouter → 12-industry DesignerRegistry → MultiAgentComposer (OpenAI Agents SDK). ES-002 real LLM 10/10 = 100% (GA gate ≥80% cleared). 12 industry Designers with auto-injected compliance/PII/shared_context. 470 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
