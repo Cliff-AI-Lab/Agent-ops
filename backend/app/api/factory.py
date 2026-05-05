@@ -221,6 +221,51 @@ async def get_artifact(session_id: str) -> dict:
     }
 
 
+# ---- V2.3 budget summary endpoint ---------------------------------------
+
+
+@router.get("/budget/{tenant_id}/today")
+async def budget_today(tenant_id: str) -> dict:
+    """Return today's accumulated spend for a tenant.
+
+    Useful for dashboards / pre-flight checks before issuing a /build call.
+    Returns 0 if no entries yet (no error — fresh tenant is fine).
+    """
+    from app.core.governance import CostLedger
+
+    ledger = CostLedger(db_path=str(_atoms_dir().parent / "harness.db"))
+    try:
+        spent = await ledger.daily_spent(tenant_id=tenant_id)
+        count = await ledger.count(tenant_id=tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        # Likely missing cost_ledger table (DB not initialized yet).
+        raise HTTPException(
+            status_code=503,
+            detail=f"cost_ledger not available: {exc}",
+        ) from exc
+    return {
+        "tenant_id": tenant_id,
+        "spent_today_cny": spent,
+        "build_count_total": count,
+    }
+
+
+@router.get("/budget/{tenant_id}/month")
+async def budget_month(tenant_id: str) -> dict:
+    """Return current month's accumulated spend for a tenant."""
+    from app.core.governance import CostLedger
+
+    ledger = CostLedger(db_path=str(_atoms_dir().parent / "harness.db"))
+    try:
+        spent = await ledger.monthly_spent(tenant_id=tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=503,
+            detail=f"cost_ledger not available: {exc}",
+        ) from exc
+    return {"tenant_id": tenant_id, "spent_month_cny": spent}
+
+
 # ---- V2.1.0+: Phase 7 stateless build endpoint via Switcher ---------------
 
 

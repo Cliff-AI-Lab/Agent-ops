@@ -260,11 +260,17 @@ def _human_eval_print(report: Any) -> None:
 
 
 async def _run_build_auto(
-    nl: str, deploy_dir: Path | None, budget_cny: float | None = None
+    nl: str,
+    deploy_dir: Path | None,
+    budget_cny: float | None = None,
+    tenant_id: str = "default",
+    use_tiktoken: bool = True,
+    soft_warn: bool = True,
 ) -> dict[str, Any]:
     """V2.1.0+ Phase 7: auto-route NL between single-agent and multi-agent paths.
 
     V2.2: optional budget_cny activates pre-flight cost gate.
+    V2.3: tiktoken real token counting + 80% soft warning + tenant_id partition.
     """
     from app.core.pipelines.factory.pipeline import FactoryPipeline
     from app.core.pipelines.factory.switcher import FactorySwitcher
@@ -279,15 +285,22 @@ async def _run_build_auto(
     estimator = None
     budget = None
     if budget_cny is not None:
-        from app.core.governance import HeuristicCostEstimator, ThresholdCostBudget
-        estimator = HeuristicCostEstimator()
-        budget = ThresholdCostBudget(threshold_cny=budget_cny)
+        from app.core.governance import (
+            HeuristicCostEstimator,
+            SoftWarnBudget,
+            ThresholdCostBudget,
+            TiktokenCostEstimator,
+        )
+        estimator = TiktokenCostEstimator() if use_tiktoken else HeuristicCostEstimator()
+        underlying = ThresholdCostBudget(threshold_cny=budget_cny)
+        budget = SoftWarnBudget(underlying=underlying) if soft_warn else underlying
 
     single = FactoryPipeline(atoms_dir=atoms_dir)
     switcher = FactorySwitcher(
         single_pipeline=single,
         cost_estimator=estimator,
         cost_budget=budget,
+        tenant_id=tenant_id,
     )
     result = await switcher.build(nl)
 
@@ -375,6 +388,22 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="V2.2 cost gate (CNY)：超过预估则拒绝 build（不传则不启用）",
     )
+    p_auto.add_argument(
+        "--tenant",
+        type=str,
+        default="default",
+        help="V2.3 多租户 tenant_id（cost ledger 分区键）",
+    )
+    p_auto.add_argument(
+        "--no-tiktoken",
+        action="store_true",
+        help="V2.3 关闭 tiktoken 真 token 计数，回退到字符长度代理（V2.2 行为）",
+    )
+    p_auto.add_argument(
+        "--no-soft-warn",
+        action="store_true",
+        help="V2.3 关闭 80% 软警告（仍硬封顶）",
+    )
 
     p_eval_multi = sub.add_parser(
         "eval-multi",
@@ -450,7 +479,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "build-auto":
         deploy_dir = Path(args.deploy) if args.deploy else None
         try:
-            result = asyncio.run(_run_build_auto(args.nl, deploy_dir, args.budget_cny))
+            result = asyncio.run(_run_build_auto(
+                args.nl,
+                deploy_dir,
+                args.budget_cny,
+                tenant_id=args.tenant,
+                use_tiktoken=not args.no_tiktoken,
+                soft_warn=not args.no_soft_warn,
+            ))
         except FileNotFoundError as exc:
             print(f"[factory] config error: {exc}", file=sys.stderr)
             return 1

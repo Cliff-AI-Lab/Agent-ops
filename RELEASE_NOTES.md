@@ -1,5 +1,88 @@
 # Agent Ops — Release Notes
 
+## V2.3.0 — 2026-05-05 · Phase 6 W4 (tiktoken + soft warn + HTTP budget summary)
+
+> 治理层升级到 V2 完整形态：真 token 计数 + 软警告 + 多租户透传到 HTTP/CLI + 预算查询端点。
+
+### 新增
+
+**TiktokenCostEstimator**
+- 用 cl100k_base（gpt-3.5/4 family）真实 token 计数
+- tiktoken 不可用时自动降级到字符长度代理（V2.2 W1 行为）
+- 继承 HeuristicCostEstimator → 同协议 drop-in 替换
+- 置信度提升：single 0.7 → 0.85，multi 0.6 → 0.75（active 时）
+- `encoding_name` 属性供诊断
+
+**SoftWarnBudget**
+- 装饰任意 CostBudget；approval 逻辑不变（直接代理）
+- 估算 ≥ warn_ratio × threshold 且 approved 时发 L5 `budget_soft_warn` 事件
+- 不阻塞 build；仅警告，给 dashboard / 告警通道用
+- 默认 warn_ratio = 0.8，校验 (0, 1) exclusive
+- 自动检测 underlying 是 sync `check` 还是 async `check_async`，与 RollingBudget 兼容
+
+**HTTP 预算查询**
+```
+GET  /api/factory/budget/{tenant}/today     {tenant_id, spent_today_cny, build_count_total}
+GET  /api/factory/budget/{tenant}/month     {tenant_id, spent_month_cny}
+```
+ledger 未建表时返 503 with hint，不破 200 假象。
+
+**HTTP `/api/factory/build` 新增 3 字段**
+- `tenant_id: str = "default"` — 多租户分区
+- `use_tiktoken: bool = True` — V2.3 真 token 计数（默认开）
+- `soft_warn: bool = True` — 80% 软警告（默认开）
+
+**CLI `factory build-auto` 新增 3 标志**
+- `--tenant <id>`
+- `--no-tiktoken`（默认开 tiktoken；标志关）
+- `--no-soft-warn`（默认开软警告；标志关）
+
+### 测试
+
+```
+506 (V2.2.1)
++6   TiktokenCostEstimator
++7   SoftWarnBudget
+=========================
+519 passed + 1 skipped
+```
+
+### Demo 用法
+
+```bash
+# 多租户 + 真 token + 软警告
+factory build-auto '做一个客服系统' \
+  --budget-cny 0.5 --tenant acme
+
+# 关 tiktoken + 关软警告（V2.2 W1 行为）
+factory build-auto '...' \
+  --budget-cny 0.5 --no-tiktoken --no-soft-warn
+```
+
+```http
+POST /api/factory/build
+{
+  "nl": "做一个银行客服系统",
+  "deploy": false,
+  "budget_cny": 0.5,
+  "tenant_id": "acme-prod",
+  "use_tiktoken": true,
+  "soft_warn": true
+}
+
+# Dashboard 拉今天花费
+GET /api/factory/budget/acme-prod/today
+{"tenant_id": "acme-prod", "spent_today_cny": 0.42, "build_count_total": 17}
+```
+
+### V2.4 路线
+
+- 跨平台 trace 聚合（Dify + n8n + OpenAI Agents SDK）
+- World 团队整合 frontend scaffold + 浏览器联调
+- Asset dependency graph（"upgrade prompt X 影响哪些 agent"）
+
+---
+
 ## V2.2.1 — 2026-05-05 · Phase 6 W2+W3 (rolling budgets + multi-tenant)
 
 > 治理层从单点 hard-cap 升级为持久化滚动预算 + 多租户。

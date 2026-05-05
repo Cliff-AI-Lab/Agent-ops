@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.2.1"
-description = "Agent Ops V2.2.1 — Phase 6 W2+W3 governance: CostLedger (SQLite persistence) + RollingBudget (daily/monthly caps) + multi-tenant isolation + Switcher integration (records approved+refused). 506 tests."
+version = "2.3.0"
+description = "Agent Ops V2.3.0 — Phase 6 W4 governance: TiktokenCostEstimator (real token counting via cl100k_base) + SoftWarnBudget (80% warning) + HTTP /api/factory/budget/{tenant}/today|month + CLI --tenant/--no-tiktoken/--no-soft-warn flags + BuildRequest tenant_id/use_tiktoken/soft_warn fields. 519 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
