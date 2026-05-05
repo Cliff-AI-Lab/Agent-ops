@@ -250,6 +250,34 @@ async def budget_today(tenant_id: str) -> dict:
     }
 
 
+@router.get("/deps/{asset_id}")
+async def deps(asset_id: str) -> dict:
+    """V2.4: dependency graph impact analysis for an asset.
+
+    Loads atoms + prompts from registry, builds graph, returns:
+      - depends_on: direct outbound (what this asset references)
+      - direct_dependents: direct inbound (who references this asset)
+      - all_dependents: transitive closure (BFS over reverse edges)
+    """
+    from app.registry.atom_loader import AtomLoaderImpl
+    from app.registry.prompt_loader import PromptLoaderImpl
+    from app.registry.dependency_graph import build_graph_from_atoms_and_prompts
+
+    atoms_dir = _atoms_dir()
+    prompts_dir = atoms_dir.parent / "prompts"
+    atoms = AtomLoaderImpl().load_all(atoms_dir) if atoms_dir.exists() else {}
+    prompts = PromptLoaderImpl().load_all(prompts_dir) if prompts_dir.exists() else {}
+    graph = build_graph_from_atoms_and_prompts(atoms, prompts)
+    report = graph.impact_of(asset_id)
+    return {
+        "asset_id": asset_id,
+        "depends_on": graph.depends_on(asset_id),
+        "direct_dependents": report.direct_dependents,
+        "all_dependents": report.all_dependents,
+        "total_assets_in_graph": len(graph.all_assets()),
+    }
+
+
 @router.get("/budget/{tenant_id}/month")
 async def budget_month(tenant_id: str) -> dict:
     """Return current month's accumulated spend for a tenant."""

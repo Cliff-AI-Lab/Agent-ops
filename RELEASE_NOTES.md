@@ -1,5 +1,62 @@
 # Agent Ops — Release Notes
 
+## V2.4.0 — 2026-05-05 · Asset Dependency Graph (V2.4 W1)
+
+> 治理层最后一块：影响面分析。"我升级 prompt X，哪些智能体会受影响？"
+
+### 新增
+
+**`registry/dependency_graph/`**
+- `DependencyGraphImpl`：forward + reverse 邻接表，O(1) 双向查询
+- `add_edge` 自动同步反向；自环拒绝；重复边去重
+- `depends_on(asset_id)` 直接出边
+- `dependents_of(asset_id)` 直接入边
+- `impact_of(asset_id)` BFS 反向 → ImpactReport（root + direct_dependents + all_dependents 闭包）
+- `has_cycle()` DFS 三色法检测
+- `all_assets()` 含 isolated 节点
+- `build_graph_from_atoms_and_prompts(atoms, prompts)` 自动从 registry 抽取 V2.4 W1 边类型：
+  - atom -> prompt（atom.io_schema.inputs.properties.prompt_id.default 引用）
+
+**CLI** `factory deps <asset_id>` + `--json`
+**HTTP** `GET /api/factory/deps/{asset_id}` → `{depends_on, direct_dependents, all_dependents, total_assets_in_graph}`
+
+### 用法
+
+```bash
+factory deps prompt.report.zh_writer.v1
+asset:                prompt.report.zh_writer.v1
+depends on (out):     -
+direct dependents:    ['atom.llm.chat.v1']
+all dependents (BFS): ['atom.llm.chat.v1']
+graph size:           7 assets
+```
+
+```http
+GET /api/factory/deps/prompt.report.zh_writer.v1
+{
+  "asset_id": "prompt.report.zh_writer.v1",
+  "depends_on": [],
+  "direct_dependents": ["atom.llm.chat.v1"],
+  "all_dependents": ["atom.llm.chat.v1"],
+  "total_assets_in_graph": 7
+}
+```
+
+### 测试
+
+```
+519 (V2.3.0) → 530 (V2.4.0) + 1 skipped
++11 dep graph (forward/reverse / impact transitive / diamond dedup / cycle detect / isolated / builder)
+```
+
+### V2.4 W2 路线
+
+- 多智能体 specimen 反向边（spec → 引用的 prompts/atoms）
+- 跨平台 trace 聚合（Dify + n8n + OpenAI Agents SDK）
+- World 团队整合 frontend scaffold
+
+---
+
 ## V2.3.0 — 2026-05-05 · Phase 6 W4 (tiktoken + soft warn + HTTP budget summary)
 
 > 治理层升级到 V2 完整形态：真 token 计数 + 软警告 + 多租户透传到 HTTP/CLI + 预算查询端点。

@@ -405,6 +405,12 @@ def main(argv: list[str] | None = None) -> int:
         help="V2.3 关闭 80% 软警告（仍硬封顶）",
     )
 
+    p_deps = sub.add_parser(
+        "deps", help="V2.4 影响面分析：查 asset_id 的依赖与反向依赖"
+    )
+    p_deps.add_argument("asset_id", help="asset_id (atom.x.y.v1 / prompt.x.y.v1 / ...)")
+    p_deps.add_argument("--json", action="store_true", help="机器可读输出")
+
     p_eval_multi = sub.add_parser(
         "eval-multi",
         help="V2.1+ 跑多智能体评测集（ES-002）via MultiAgentEvalRunner",
@@ -455,6 +461,35 @@ def main(argv: list[str] | None = None) -> int:
 
         if not report.is_mvp_threshold_met:
             return 3
+        return 0
+
+    if args.cmd == "deps":
+        from app.registry.atom_loader import AtomLoaderImpl
+        from app.registry.prompt_loader import PromptLoaderImpl
+        from app.registry.dependency_graph import build_graph_from_atoms_and_prompts
+
+        atoms_dir = _atoms_dir()
+        prompts_dir = atoms_dir.parent / "prompts"
+        atoms = AtomLoaderImpl().load_all(atoms_dir) if atoms_dir.exists() else {}
+        prompts = PromptLoaderImpl().load_all(prompts_dir) if prompts_dir.exists() else {}
+        g = build_graph_from_atoms_and_prompts(atoms, prompts)
+        report = g.impact_of(args.asset_id)
+        depends = g.depends_on(args.asset_id)
+
+        if args.json:
+            print(json.dumps({
+                "asset_id": args.asset_id,
+                "depends_on": depends,
+                "direct_dependents": report.direct_dependents,
+                "all_dependents": report.all_dependents,
+                "total_assets_in_graph": len(g.all_assets()),
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"asset:                {args.asset_id}")
+            print(f"depends on (out):     {depends or '-'}")
+            print(f"direct dependents:    {report.direct_dependents or '-'}")
+            print(f"all dependents (BFS): {report.all_dependents or '-'}")
+            print(f"graph size:           {len(g.all_assets())} assets")
         return 0
 
     if args.cmd == "eval-multi":
