@@ -225,10 +225,11 @@ async def get_artifact(session_id: str) -> dict:
 
 
 class BuildRequest(BaseModel):
-    """Request body for /api/factory/build (Phase 7)."""
+    """Request body for /api/factory/build (Phase 7 + V2.2 cost gate)."""
 
     nl: str
     deploy: bool = False  # if True, multi-agent path writes artifact to disk
+    budget_cny: float | None = None  # V2.2: enable pre-flight cost gate when set
 
 
 @router.post("/build")
@@ -249,15 +250,40 @@ async def build_auto(req: BuildRequest) -> dict:
     if not req.nl or not req.nl.strip():
         raise HTTPException(status_code=400, detail="nl cannot be empty")
 
+    from app.core.governance import (
+        CostBudgetExceeded,
+        HeuristicCostEstimator,
+        ThresholdCostBudget,
+    )
     from app.core.pipelines.factory.multi_agent_pipeline import (
         MultiAgentFactoryPipeline,
     )
     from app.core.pipelines.factory.switcher import FactorySwitcher
 
+    estimator = None
+    budget = None
+    if req.budget_cny is not None:
+        if req.budget_cny <= 0:
+            raise HTTPException(status_code=400, detail="budget_cny must be positive")
+        estimator = HeuristicCostEstimator()
+        budget = ThresholdCostBudget(threshold_cny=req.budget_cny)
+
     single = _build_pipeline()
-    switcher = FactorySwitcher(single_pipeline=single)
+    switcher = FactorySwitcher(
+        single_pipeline=single,
+        cost_estimator=estimator,
+        cost_budget=budget,
+    )
     try:
         result = await switcher.build(req.nl)
+    except CostBudgetExceeded as exc:
+        # 402 Payment Required — semantically nicer than 400 for budget refusal
+        raise HTTPException(status_code=402, detail={
+            "error": "cost_budget_exceeded",
+            "reason": exc.decision.reason,
+            "estimate_cny": exc.decision.estimate.estimated_total_cny,
+            "threshold_cny": exc.decision.threshold_cny,
+        }) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

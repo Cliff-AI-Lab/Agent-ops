@@ -1,5 +1,76 @@
 # Agent Ops — Release Notes
 
+## V2.2.0 — 2026-05-05 · Phase 6 W1 Governance + Codex Review Fixes
+
+> 第一个 V2.1.0 GA 后的迭代版本：治理层 W1 上线（cost gate）+ Codex 独立 review 找到的 3 个真实 bug 全修。
+
+### 新增能力
+
+**Phase 6 W1 治理层（governance/）**
+- `CostEstimator` Protocol + `HeuristicCostEstimator`：字符长度 token 代理 + 默认中等模型价格（0.07 / 0.21 CNY/1k）
+- `CostBudget` Protocol + `ThresholdCostBudget`：单点 hard cap，估算 ≤ 阈值通过
+- `CostBudgetExceeded` 异常 + `CostBudgetDecision` Pydantic
+- L5 trace `factory.budget_check` 含全部数字
+- 集成 `FactorySwitcher`：可选 `cost_estimator` + `cost_budget` 注入；都给即激活 pre-flight 网关
+- CLI: `factory build-auto --budget-cny 0.5` 启用网关，超额 exit 5
+- HTTP: `POST /api/factory/build {budget_cny}` 启用网关，超额 HTTP 402 Payment Required
+
+**早期退出节省 token**：Switcher pre-flight 在 Stage 1 (classify) 后但 Stage 2 (designer / pipeline) 前检查 — 拒绝时只花 1 个 LLM call（classify），不浪费昂贵的 designer extraction 或 resolver rank。
+
+### Codex Review 修复（V2.1.0 → V2.2.0）
+
+`codex review --commit dcd5ca8` 在 read-only 模式找到 3 个真实问题：
+
+| # | 严重度 | 修复 |
+|---|---|---|
+| P1 | high | `eval-multi` 退出码改用 GA 阈值（80%），不再是 MVP（70%） |
+| P2 | medium | `ExpectedShape.allowed_industry_codes` 多值白名单字段，m01/m02 复活 machine assertion |
+| P3 | low | `eval-multi` pre-flight 检查拒绝单工作流集（如 ES-001） |
+
+### 测试
+
+```
+470 (V2.1.0)
++19  governance unit tests (9 estimator + 8 budget + 2 integration)
++3   switcher cost gate tests
+=========================
+492 passed + 1 skipped
+```
+
+### 新 CLI / API surface
+
+```bash
+factory build-auto '...' --budget-cny 0.5     # 超额拒绝（exit 5）
+```
+
+```http
+POST /api/factory/build
+Content-Type: application/json
+{
+  "nl": "...",
+  "deploy": false,
+  "budget_cny": 0.5
+}
+
+# 200 if ok, 402 Payment Required if budget exceeded
+{
+  "error": "cost_budget_exceeded",
+  "reason": "estimate 0.7234 CNY exceeds threshold 0.5000 CNY by 0.2234 CNY",
+  "estimate_cny": 0.7234,
+  "threshold_cny": 0.5
+}
+```
+
+### V2.3+ 治理路线
+
+- 真 token 计数（tiktoken 集成）
+- 滚动预算（日 / 月，DB 持久化）
+- 多租户 budget allowance
+- 软警告（80% 阈值时只 warn 不阻塞）
+- 跨平台 trace 聚合（Dify + n8n + OpenAI Agents SDK）
+
+---
+
 ## V2.1.0 — 2026-05-04 · Phase 7 GA · Multi-Agent Factory General Availability
 
 > Phase 7 主线收官。V1 GA（V2.0.5 单工作流工厂）→ V2.1.0（多智能体工厂）。
