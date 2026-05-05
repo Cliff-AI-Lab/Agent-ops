@@ -76,6 +76,26 @@ CREATE TABLE factory_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_factory_sessions_state ON factory_sessions(state);
 
+-- V2.2 W2: cost ledger for rolling budget tracking
+DROP TABLE IF EXISTS cost_ledger;
+CREATE TABLE cost_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,                 -- ISO8601 UTC
+  date_utc TEXT NOT NULL,           -- YYYY-MM-DD for daily aggregation
+  month_utc TEXT NOT NULL,          -- YYYY-MM for monthly aggregation
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  path TEXT NOT NULL,               -- 'single' | 'multi'
+  estimated_cny REAL NOT NULL,
+  tokens_in INTEGER NOT NULL,
+  tokens_out INTEGER NOT NULL,
+  llm_calls INTEGER NOT NULL,
+  approved INTEGER NOT NULL,        -- 1 = build proceeded, 0 = refused
+  session_id TEXT,                  -- optional link to factory_sessions
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_date ON cost_ledger(date_utc, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_month ON cost_ledger(month_utc, tenant_id);
+
 DROP TABLE IF EXISTS factory_artifacts;
 CREATE TABLE factory_artifacts (
   artifact_id TEXT PRIMARY KEY,
