@@ -26,6 +26,7 @@ from app.core.governance import (
     CostBudget,
     CostBudgetExceeded,
     CostEstimator,
+    CostLedger,
 )
 from app.core.llm.client import LLMClient
 from app.core.llm.model_router import ModelRouter
@@ -51,6 +52,8 @@ class FactorySwitcher:
         model_router: Optional[ModelRouter] = None,
         cost_estimator: Optional[CostEstimator] = None,
         cost_budget: Optional[CostBudget] = None,
+        cost_ledger: Optional[CostLedger] = None,
+        tenant_id: str = "default",
     ) -> None:
         """All sub-components injectable. Defaults wire V2.1.0 W1+W2 impls.
 
@@ -61,6 +64,10 @@ class FactorySwitcher:
         BOTH supplied, Switcher runs a pre-flight cost estimate and refuses the
         build (raises CostBudgetExceeded) if the estimate exceeds the budget.
         Either alone disables the gate.
+
+        cost_ledger (V2.2 W3) is optional persistent log. When supplied, every
+        cost-gated decision (approved or refused) is recorded for daily/monthly
+        rolling budget enforcement. tenant_id partitions ledger entries.
         """
         shared_model_router = model_router or ModelRouter()
         self._router = router or IndustryRouterImpl(
@@ -74,6 +81,8 @@ class FactorySwitcher:
         # Cost gate (V2.2): only active when BOTH estimator and budget supplied
         self._cost_estimator = cost_estimator
         self._cost_budget = cost_budget
+        self._ledger = cost_ledger
+        self._tenant = tenant_id
 
     async def build(self, nl: str) -> dict[str, Any]:
         if not nl or not nl.strip():
@@ -98,7 +107,24 @@ class FactorySwitcher:
                 estimate = self._cost_estimator.estimate_multi(nl)
             else:
                 estimate = self._cost_estimator.estimate_single(nl)
-            decision = self._cost_budget.check(estimate)
+
+            # RollingBudget supports check_async; ThresholdCostBudget is sync-only.
+            check_async = getattr(self._cost_budget, "check_async", None)
+            if check_async is not None:
+                decision = await check_async(estimate)
+            else:
+                decision = self._cost_budget.check(estimate)
+
+            path_label = "multi" if classification.is_multi_agent else "single"
+            # V2.2 W3: record to ledger if available (approved + refused both)
+            if self._ledger is not None:
+                await self._ledger.record(
+                    estimate=estimate,
+                    approved=decision.approved,
+                    path=path_label,
+                    tenant_id=self._tenant,
+                )
+
             if not decision.approved:
                 raise CostBudgetExceeded(decision)
 

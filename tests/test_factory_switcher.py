@@ -276,6 +276,111 @@ async def test_cost_gate_passes_under_budget():
 
 
 @pytest.mark.asyncio
+async def test_switcher_records_to_ledger_when_supplied(tmp_path):
+    """V2.2 W3: every cost-gated decision (approved + refused) hits ledger."""
+    import aiosqlite
+    from app.core.governance import (
+        CostLedger,
+        HeuristicCostEstimator,
+        ThresholdCostBudget,
+    )
+
+    SCHEMA = """
+    CREATE TABLE cost_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL, date_utc TEXT NOT NULL, month_utc TEXT NOT NULL,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
+      path TEXT NOT NULL, estimated_cny REAL NOT NULL,
+      tokens_in INTEGER NOT NULL, tokens_out INTEGER NOT NULL,
+      llm_calls INTEGER NOT NULL, approved INTEGER NOT NULL,
+      session_id TEXT, notes TEXT
+    );
+    """
+    db_path = str(tmp_path / "switcher_ledger.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.executescript(SCHEMA)
+        await db.commit()
+
+    llm = MagicMock()
+    llm.chat = AsyncMock(
+        side_effect=[
+            ChatMessage(role="assistant", content=json.dumps(_classification_multi_payload())),
+            ChatMessage(role="assistant", content=json.dumps(_designer_payload())),
+        ]
+    )
+    model_router = MagicMock()
+    model_router.resolve = MagicMock(return_value="test-model")
+    ledger = CostLedger(db_path=db_path)
+
+    switcher = FactorySwitcher(
+        llm_client=llm,
+        model_router=model_router,
+        cost_estimator=HeuristicCostEstimator(),
+        cost_budget=ThresholdCostBudget(threshold_cny=10.00),
+        cost_ledger=ledger,
+        tenant_id="acme",
+    )
+    await switcher.build("做一个客服多 agent 系统")
+
+    assert await ledger.count(tenant_id="acme") == 1
+    spent = await ledger.daily_spent(tenant_id="acme")
+    assert spent > 0
+    # default tenant should be empty
+    assert await ledger.count(tenant_id="default") == 0
+
+
+@pytest.mark.asyncio
+async def test_switcher_records_refused_to_ledger(tmp_path):
+    """Refused builds also recorded (with approved=0); daily_spent excludes them."""
+    import aiosqlite
+    from app.core.governance import (
+        CostBudgetExceeded,
+        CostLedger,
+        HeuristicCostEstimator,
+        ThresholdCostBudget,
+    )
+
+    SCHEMA = """
+    CREATE TABLE cost_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL, date_utc TEXT NOT NULL, month_utc TEXT NOT NULL,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
+      path TEXT NOT NULL, estimated_cny REAL NOT NULL,
+      tokens_in INTEGER NOT NULL, tokens_out INTEGER NOT NULL,
+      llm_calls INTEGER NOT NULL, approved INTEGER NOT NULL,
+      session_id TEXT, notes TEXT
+    );
+    """
+    db_path = str(tmp_path / "switcher_refused.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.executescript(SCHEMA)
+        await db.commit()
+
+    llm = MagicMock()
+    llm.chat = AsyncMock(
+        return_value=ChatMessage(
+            role="assistant", content=json.dumps(_classification_multi_payload())
+        )
+    )
+    model_router = MagicMock()
+    model_router.resolve = MagicMock(return_value="test-model")
+    ledger = CostLedger(db_path=db_path)
+
+    switcher = FactorySwitcher(
+        llm_client=llm,
+        model_router=model_router,
+        cost_estimator=HeuristicCostEstimator(),
+        cost_budget=ThresholdCostBudget(threshold_cny=0.001),  # absurd
+        cost_ledger=ledger,
+    )
+    with pytest.raises(CostBudgetExceeded):
+        await switcher.build("test multi-agent build")
+
+    assert await ledger.count() == 1  # refused recorded
+    assert await ledger.daily_spent() == 0.0  # refused excluded from spent
+
+
+@pytest.mark.asyncio
 async def test_cost_gate_skipped_when_only_estimator_supplied():
     """Estimator alone (no budget) does NOT gate the build."""
     from app.core.governance import HeuristicCostEstimator
