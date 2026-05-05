@@ -1,5 +1,73 @@
 # Agent Ops — Release Notes
 
+## V2.2.1 — 2026-05-05 · Phase 6 W2+W3 (rolling budgets + multi-tenant)
+
+> 治理层从单点 hard-cap 升级为持久化滚动预算 + 多租户。
+
+### 新增
+
+**`CostLedger`（SQLite 持久化）**
+- 新表 `cost_ledger`：ts / date_utc / month_utc / tenant_id / path / estimated_cny / tokens / llm_calls / approved / session_id / notes
+- index on (date_utc, tenant_id) + (month_utc, tenant_id) 高效聚合
+- 异步 API：`record()` / `daily_spent()` / `monthly_spent()` / `count()`
+- 路径 `single | multi`，approved=False 不计入 spent 但计入 count
+- 多租户隔离（tenant_id 字段）
+
+**`RollingBudget`（日/月双盖）**
+- 至少需要 daily_cap_cny / monthly_cap_cny 中之一
+- `threshold_cny` 属性 = min(daily, monthly)，兼容 CostBudget Protocol
+- `check_async()` 异步实现（读 ledger）
+- `check()` 同步包装（事件循环内调用会清晰报错）
+- 任一盖被拍即拒绝；reason 列出哪盖+数字
+- L5 trace 事件 `rolling_budget_check`
+
+**Switcher 集成**
+- 新参数 `cost_ledger` + `tenant_id`
+- 自动协议检测：`check_async` 优先，回退 `check`（兼容 V2.2 W1 ThresholdCostBudget）
+- approved + refused 都写 ledger（审计完整）
+- 早退保留：refused 时只花 1 次 LLM call（classify）
+
+### 测试
+
+```
+492 (V2.2.0)
++12  Ledger + RollingBudget unit tests
++2   Switcher × ledger integration
+=========================
+506 passed + 1 skipped
+```
+
+### 用法
+
+```python
+from app.core.governance import CostLedger, HeuristicCostEstimator, RollingBudget
+
+ledger = CostLedger("harness.db")
+budget = RollingBudget(
+    ledger=ledger,
+    daily_cap_cny=10.0,
+    monthly_cap_cny=200.0,
+    tenant_id="acme",
+)
+switcher = FactorySwitcher(
+    cost_estimator=HeuristicCostEstimator(),
+    cost_budget=budget,
+    cost_ledger=ledger,
+    tenant_id="acme",
+)
+# 第一次跑：approved，spent today += 0.5
+# 跑到 spent today + 这次 estimate > 10.0 时：refused
+```
+
+### V2.3 路线
+
+- HTTP /api/factory/build 接 tenant_id（需要 tenant 路由）
+- tiktoken 替换字符长度 token 代理
+- 软警告（80% 阈值时只 warn 不 block）
+- CLI factory build-auto --tenant + --rolling-budget
+
+---
+
 ## V2.2.0 — 2026-05-05 · Phase 6 W1 Governance + Codex Review Fixes
 
 > 第一个 V2.1.0 GA 后的迭代版本：治理层 W1 上线（cost gate）+ Codex 独立 review 找到的 3 个真实 bug 全修。

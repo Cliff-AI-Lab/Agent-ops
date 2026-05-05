@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ops"
-version = "2.2.0"
-description = "Agent Ops V2.2.0 — Phase 6 W1 governance: HeuristicCostEstimator + ThresholdCostBudget + Switcher pre-flight gate + factory build-auto --budget-cny + HTTP /api/factory/build budget_cny field. Codex review P1+P2+P3 fixes (eval-multi GA gate / industry whitelist / set type guard). 492 tests."
+version = "2.2.1"
+description = "Agent Ops V2.2.1 — Phase 6 W2+W3 governance: CostLedger (SQLite persistence) + RollingBudget (daily/monthly caps) + multi-tenant isolation + Switcher integration (records approved+refused). 506 tests."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
