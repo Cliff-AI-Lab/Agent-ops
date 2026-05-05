@@ -225,11 +225,14 @@ async def get_artifact(session_id: str) -> dict:
 
 
 class BuildRequest(BaseModel):
-    """Request body for /api/factory/build (Phase 7 + V2.2 cost gate)."""
+    """Request body for /api/factory/build (Phase 7 + V2.2/V2.3 governance)."""
 
     nl: str
     deploy: bool = False  # if True, multi-agent path writes artifact to disk
     budget_cny: float | None = None  # V2.2: enable pre-flight cost gate when set
+    tenant_id: str = "default"  # V2.3: partitions cost ledger entries
+    use_tiktoken: bool = True   # V2.3: real token count vs char-length proxy
+    soft_warn: bool = True      # V2.3: emit budget_soft_warn at 80% threshold
 
 
 @router.post("/build")
@@ -253,7 +256,9 @@ async def build_auto(req: BuildRequest) -> dict:
     from app.core.governance import (
         CostBudgetExceeded,
         HeuristicCostEstimator,
+        SoftWarnBudget,
         ThresholdCostBudget,
+        TiktokenCostEstimator,
     )
     from app.core.pipelines.factory.multi_agent_pipeline import (
         MultiAgentFactoryPipeline,
@@ -265,14 +270,20 @@ async def build_auto(req: BuildRequest) -> dict:
     if req.budget_cny is not None:
         if req.budget_cny <= 0:
             raise HTTPException(status_code=400, detail="budget_cny must be positive")
-        estimator = HeuristicCostEstimator()
-        budget = ThresholdCostBudget(threshold_cny=req.budget_cny)
+        estimator = (
+            TiktokenCostEstimator() if req.use_tiktoken else HeuristicCostEstimator()
+        )
+        underlying_budget = ThresholdCostBudget(threshold_cny=req.budget_cny)
+        budget = (
+            SoftWarnBudget(underlying=underlying_budget) if req.soft_warn else underlying_budget
+        )
 
     single = _build_pipeline()
     switcher = FactorySwitcher(
         single_pipeline=single,
         cost_estimator=estimator,
         cost_budget=budget,
+        tenant_id=req.tenant_id,
     )
     try:
         result = await switcher.build(req.nl)
