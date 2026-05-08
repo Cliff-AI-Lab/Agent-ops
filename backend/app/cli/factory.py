@@ -34,6 +34,14 @@ except Exception:  # noqa: BLE001
     pass
 
 
+def _default_harness_db_path() -> Path:
+    env = os.getenv("HARNESS_DB_PATH")
+    if env:
+        return Path(env)
+    # backend/app/cli/factory.py -> harness root = parents[3]
+    return Path(__file__).resolve().parents[3] / "harness.db"
+
+
 def _atoms_dir() -> Path:
     """Locate capabilities/atom relative to this CLI's install."""
     custom = os.environ.get("FACTORY_ATOMS_DIR")
@@ -447,6 +455,24 @@ def main(argv: list[str] | None = None) -> int:
                          help="Dify base URL; 默认 $DIFY_BASE_URL 或 http://localhost:8080")
     p_drift.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_score = sub.add_parser(
+        "atom-score",
+        help="V2.7 看某个原子的使用度评分 (黑灯工厂自反馈)",
+    )
+    p_score.add_argument("asset_id", help="atom asset_id, e.g. atom.llm.chat.v1")
+    p_score.add_argument("--db", default=None, help="harness.db 路径; 默认仓库根")
+    p_score.add_argument("--json", action="store_true", help="机器可读输出")
+
+    p_rank = sub.add_parser(
+        "atom-rank",
+        help="V2.7 列出原子使用度排行 (高到低)",
+    )
+    p_rank.add_argument("--layer", default="atom.",
+                        help="layer prefix; 默认 'atom.'")
+    p_rank.add_argument("--top", type=int, default=None, help="只看前 N 个")
+    p_rank.add_argument("--db", default=None, help="harness.db 路径; 默认仓库根")
+    p_rank.add_argument("--json", action="store_true", help="机器可读输出")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
@@ -656,6 +682,64 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  detail:         {report.detail}")
 
         return 3 if report.has_drift else 0
+
+    if args.cmd in ("atom-score", "atom-rank"):
+        from dataclasses import asdict
+        from app.delivery.atom_score_service import AtomScoreService
+        from app.registry.atom_loader import AtomLoaderImpl
+
+        atoms_dir = _atoms_dir()
+        atoms = AtomLoaderImpl().load_all(atoms_dir) if atoms_dir.exists() else {}
+
+        db_arg = getattr(args, "db", None)
+        db_path = Path(db_arg) if db_arg else _default_harness_db_path()
+        if not db_path.exists():
+            print(f"[factory] harness.db not found: {db_path}", file=sys.stderr)
+            return 1
+        svc = AtomScoreService.from_atom_loader(db_path, atoms)
+
+        if args.cmd == "atom-score":
+            score = svc.score(args.asset_id)
+            if args.json:
+                payload = asdict(score)
+                if score.stats:
+                    payload["stats"] = asdict(score.stats)
+                print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+            else:
+                print(f"atom_id:    {score.atom_id}")
+                print(f"score:      {score.score:.4f}")
+                print(f"history:    {'yes' if score.has_history else 'no (cold start)'}")
+                print(f"static pr:  {score.static_pass_rate}")
+                if score.stats:
+                    s = score.stats
+                    print(f"specimens:  {s.specimen_count}")
+                    print(f"qa pass/fail: {s.qa_pass}/{s.qa_fail}")
+                    print(f"industries: {s.industry_breadth}")
+                    print(f"last used:  {s.last_used_at or '-'}")
+                print(f"explain:    {score.explanation}")
+                if score.components:
+                    print("components:")
+                    for k, v in score.components.items():
+                        print(f"  {k}: {v}")
+            return 0
+
+        # atom-rank
+        ranked = svc.rank(layer_prefix=args.layer, top=args.top)
+        if args.json:
+            print(json.dumps(
+                [{"atom_id": r.atom_id, "score": r.score,
+                  "has_history": r.has_history,
+                  "specimens": (r.stats.specimen_count if r.stats else 0)}
+                 for r in ranked],
+                ensure_ascii=False, indent=2,
+            ))
+        else:
+            print(f"{'rank':>4} {'score':>7} {'hist':>4} {'spec':>4}  atom_id")
+            for i, r in enumerate(ranked, 1):
+                hist = "yes" if r.has_history else "no"
+                spc = r.stats.specimen_count if r.stats else 0
+                print(f"{i:>4}  {r.score:>6.4f}  {hist:>4} {spc:>4}  {r.atom_id}")
+        return 0
 
     parser.error(f"unknown command: {args.cmd}")
     return 2
