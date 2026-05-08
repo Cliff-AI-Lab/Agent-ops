@@ -419,6 +419,34 @@ def main(argv: list[str] | None = None) -> int:
     p_eval_multi.add_argument("--only", default=None, help="只跑某一 case_id")
     p_eval_multi.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_deploy = sub.add_parser(
+        "deploy",
+        help="V2.6 一键发布: NL 或 YAML -> Dify 真机 (黑灯工厂)",
+    )
+    g_in = p_deploy.add_mutually_exclusive_group(required=True)
+    g_in.add_argument("--nl", help="自然语言需求 (走 build 再 deploy)")
+    g_in.add_argument("--yaml", help="已有 Dify YAML 文件路径 (跳过 build)")
+    p_deploy.add_argument(
+        "--specimen-id",
+        required=True,
+        help="生产单 ID. 同 specimen_id 复用同 dify_app_id (覆盖升级)",
+    )
+    p_deploy.add_argument("--target", default="dify", choices=["dify"],
+                          help="部署目标. n8n/hybrid 留 Phase 9")
+    p_deploy.add_argument("--dify-base", default=None,
+                          help="Dify base URL; 默认 $DIFY_BASE_URL 或 http://localhost:8080")
+    p_deploy.add_argument("--name", default=None, help="Dify app name override")
+    p_deploy.add_argument("--json", action="store_true", help="机器可读输出")
+
+    p_drift = sub.add_parser(
+        "drift-check",
+        help="V2.6 检查 Dify 上的工厂部署是否被人改过 (单向 push 边界)",
+    )
+    p_drift.add_argument("--specimen-id", required=True, help="生产单 ID")
+    p_drift.add_argument("--dify-base", default=None,
+                         help="Dify base URL; 默认 $DIFY_BASE_URL 或 http://localhost:8080")
+    p_drift.add_argument("--json", action="store_true", help="机器可读输出")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
@@ -555,6 +583,79 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _human_print_auto(result)
         return 0
+
+    if args.cmd == "deploy":
+        from dataclasses import asdict
+        from app.delivery.dify_publisher import DifyPublisher
+
+        if args.yaml:
+            yaml_path = Path(args.yaml)
+            if not yaml_path.exists():
+                print(f"[factory] yaml not found: {yaml_path}", file=sys.stderr)
+                return 1
+            yaml_text = yaml_path.read_text(encoding="utf-8")
+            print(f"[deploy] using existing yaml: {yaml_path} ({len(yaml_text)} chars)",
+                  file=sys.stderr)
+        else:
+            try:
+                build_result = asyncio.run(_run_build(args.nl))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[factory] build failed before deploy: {exc}", file=sys.stderr)
+                return 4
+            outputs = build_result.get("outputs", {})
+            yaml_text = outputs.get("dify") or build_result.get("dsl") or ""
+            if not yaml_text:
+                print("[factory] build produced no dify YAML", file=sys.stderr)
+                return 4
+            print(f"[deploy] built {len(yaml_text)} chars from NL", file=sys.stderr)
+
+        publisher = DifyPublisher(base_url=args.dify_base)
+        try:
+            res = publisher.publish(args.specimen_id, yaml_text, app_name=args.name)
+        except RuntimeError as exc:
+            print(f"[factory] deploy failed: {exc}", file=sys.stderr)
+            return 4
+
+        if args.json:
+            print(json.dumps(asdict(res), ensure_ascii=False, indent=2))
+        else:
+            tag = "FIRST" if res.is_first_deploy else f"REDEPLOY (count={res.deploy_count})"
+            print(f"[deploy] {tag} specimen={res.specimen_id}")
+            print(f"  dify_app_id: {res.dify_app_id}")
+            print(f"  status:      {res.status}")
+            print(f"  yaml sha256: {res.yaml_sha256}")
+            if res.error:
+                print(f"  ERROR:       {res.error}")
+            else:
+                base = (args.dify_base or os.getenv("DIFY_BASE_URL") or "http://localhost:8080").rstrip("/")
+                print(f"  view in Dify: {base}/app/{res.dify_app_id}/workflow")
+
+        return 0 if not res.error else 4
+
+    if args.cmd == "drift-check":
+        from dataclasses import asdict
+        from app.delivery.dify_publisher import DifyPublisher
+
+        publisher = DifyPublisher(base_url=args.dify_base)
+        try:
+            report = publisher.drift_check(args.specimen_id)
+        except RuntimeError as exc:
+            print(f"[factory] drift-check failed: {exc}", file=sys.stderr)
+            return 4
+
+        if args.json:
+            print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
+        else:
+            print(f"[drift-check] specimen={report.specimen_id}")
+            print(f"  dify_app_id:    {report.dify_app_id or '(none)'}")
+            print(f"  factory sha256: {report.factory_sha256 or '-'}")
+            print(f"  dify sha256:    {report.dify_sha256 or '-'}")
+            print(f"  drift:          {'YES' if report.has_drift else 'no'}")
+            print(f"  reason:         {report.reason}")
+            if report.detail:
+                print(f"  detail:         {report.detail}")
+
+        return 3 if report.has_drift else 0
 
     parser.error(f"unknown command: {args.cmd}")
     return 2
