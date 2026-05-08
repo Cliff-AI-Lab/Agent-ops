@@ -29,6 +29,7 @@ from app.core.pipelines.factory.resolver.bind import (
 from app.core.pipelines.factory.resolver.rank import rank_candidates
 from app.core.pipelines.factory.resolver.recall import recall_for_step
 from app.core.trace.bus import emit
+from app.delivery.atom_score_service import AtomScoreService
 from app.registry.search_engine import SearchEngineImpl
 
 
@@ -38,10 +39,12 @@ class ResolverImpl:
         search_engine: SearchEngineImpl,
         llm_client: LLMClient | None = None,
         model_router: ModelRouter | None = None,
+        score_service: AtomScoreService | None = None,
     ) -> None:
         self._search = search_engine
         self._llm = llm_client
         self._router = model_router or ModelRouter()
+        self._score_service = score_service
 
     async def resolve(self, intent: StructuredIntent) -> ResolvedDAG:
         emit(
@@ -85,6 +88,7 @@ class ResolverImpl:
                     candidates=candidates,
                     llm_client=self._llm,
                     model=rank_model,
+                    score_service=self._score_service,
                 )
             except Exception as exc:
                 emit("L3", "Resolver", "rank_fail", f"step={step.id} err={exc}")

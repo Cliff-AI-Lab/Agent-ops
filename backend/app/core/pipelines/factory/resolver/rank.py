@@ -4,6 +4,16 @@ LLM gets candidates + each candidate's NOT_applicable list as a HARD prompt
 constraint (not a soft scoring hint). Output: single selected atom + confidence + reason.
 
 For LLM-subcategory atoms, also outputs llm_task_type + llm_size.
+
+Phase 9 W1 Day 3: optional ``score_service`` injects atom-usage feedback as a
+weighted confidence multiplier:
+
+    final = base_confidence * (1 + SCORE_SIGNAL_ALPHA * usage_score)
+
+Cold-start atoms (no usage history) carry score=0, so the signal is a no-op
+on first use - the LLM rank decision passes through unchanged. Once an atom
+accrues real reuse, popular+reliable parts pull confidence up. Failed atoms
+sink. The factory curates its own library.
 """
 
 from __future__ import annotations
@@ -16,7 +26,11 @@ from pydantic import BaseModel
 from app.core.llm.client import ChatMessage, LLMClient
 from app.core.pipelines.factory.ir import StepSpec
 from app.core.trace.bus import emit
+from app.delivery.atom_score_service import AtomScoreService
 from app.registry.atom_loader import AtomDef
+
+
+SCORE_SIGNAL_ALPHA = 0.2  # max +20% lift when a part has perfect usage history
 
 
 class RankResult(BaseModel):
@@ -64,8 +78,13 @@ async def rank_candidates(
     candidates: list[tuple[AtomDef, float]],
     llm_client: LLMClient,
     model: str,
+    score_service: AtomScoreService | None = None,
 ) -> _Selection:
-    """LLM ranks candidates, returns top-1 with reason."""
+    """LLM ranks candidates, returns top-1 with reason.
+
+    If ``score_service`` is provided, a Phase 9 reuse-feedback signal lifts
+    the confidence of atoms with strong real-world usage history.
+    """
     if not candidates:
         raise ValueError(f"rank_candidates: no candidates for step {step.id}")
 
@@ -80,7 +99,7 @@ async def rank_candidates(
         )
         if atom.subcategory == "LLM":
             sel.llm_task_type, sel.llm_size = _heuristic_llm_routing(step.verb)
-        return sel
+        return _apply_score_signal(sel, step, score_service)
 
     prompt_user = _build_user_prompt(step, candidates)
     messages = [
@@ -111,23 +130,69 @@ async def rank_candidates(
         )
         if atom.subcategory == "LLM":
             sel.llm_task_type, sel.llm_size = _heuristic_llm_routing(step.verb)
-        return sel
+        return _apply_score_signal(sel, step, score_service)
 
     by_id = {a.asset_id: a for a, _ in candidates}
     if result.asset_id not in by_id:
         atom, score = candidates[0]
-        return _Selection(
+        sel = _Selection(
             atom=atom,
             confidence=score * 0.5,
             reason=f"LLM picked unknown asset {result.asset_id}; fell back to top recall",
         )
-    return _Selection(
+        return _apply_score_signal(sel, step, score_service)
+    sel = _Selection(
         atom=by_id[result.asset_id],
         confidence=result.confidence,
         reason=result.reason,
         llm_task_type=result.llm_task_type,
         llm_size=result.llm_size,
     )
+    return _apply_score_signal(sel, step, score_service)
+
+
+def _apply_score_signal(
+    selection: _Selection,
+    step: StepSpec,
+    score_service: AtomScoreService | None,
+) -> _Selection:
+    """Phase 9 W1 Day 3: weight confidence by atom usage feedback.
+
+    No-op when score_service is None (Phase 8 baseline behavior preserved).
+    Always emits a trace event when the service is present, even on cold-
+    start atoms (score=0), so observers see signals consistently.
+    """
+    if score_service is None:
+        return selection
+    asset_id = selection.atom.asset_id
+    try:
+        score = score_service.score(asset_id)
+    except Exception as exc:  # noqa: BLE001
+        emit(
+            "L3",
+            "Resolver.rank",
+            "score_signal_unavailable",
+            f"step={step.id} asset={asset_id} err={exc}",
+        )
+        return selection
+
+    base = selection.confidence
+    multiplier = 1.0 + SCORE_SIGNAL_ALPHA * score.score
+    final = min(1.0, max(0.0, base * multiplier))
+
+    emit(
+        "L3",
+        "Resolver.rank",
+        "score_signal_applied",
+        (
+            f"step={step.id} asset={asset_id} "
+            f"base={base:.4f} score={score.score:.4f} "
+            f"multiplier={multiplier:.4f} final={final:.4f} "
+            f"history={'yes' if score.has_history else 'cold'}"
+        ),
+    )
+    selection.confidence = final
+    return selection
 
 
 def _build_user_prompt(step: StepSpec, candidates: list[tuple[AtomDef, float]]) -> str:
