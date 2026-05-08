@@ -1,47 +1,85 @@
-"""DifyCompilerImpl V1 - emits Dify-flavored YAML from ResolvedDAG.
+"""DifyCompilerImpl V2 - emits Dify-compatible YAML (DSL v0.4.0+) from ResolvedDAG.
 
-V1 simplification: emits a workflow YAML structure roughly matching Dify's
-exported app format (app + workflow.graph.nodes + workflow.graph.edges).
-Each node type is a coarse mapping; exact Dify YAML tuning happens once we
-have a sandbox to import into.
+V2 (Phase 8 Day 1): rewrite to match real Dify export schema reverse-engineered
+from ``api/services/app_dsl_service.py`` and golden sample
+``scripts/stress-test/setup/dsl/workflow_llm.yml``.
+
+Top-level structure:
+    version: "0.4.0"   # DSL version; 0.6.0 (current main) accepts 0.4.0
+    kind: app
+    app: { name, mode, icon, icon_background, description, use_icon_as_answer_icon }
+    dependencies: []
+    workflow:
+      conversation_variables: []
+      environment_variables: []
+      features: {}
+      graph:
+        edges: [...]
+        nodes: [...]
+        viewport: {x, y, zoom}
+
+Per-node structure (every node has top-level type=custom, real type in data.type):
+    - data: { type: start|llm|code|http-request|end, title, desc, ... }
+      id: '<string_id>'
+      type: custom
+      position: {x, y}
+      positionAbsolute: {x, y}
+      width: 244
+      height: 90
+      sourcePosition: right
+      targetPosition: left
+      selected: false
 
 PURE TEMPLATE-BASED: NO LLM call here. Determinism is the entire point.
 Same ResolvedDAG -> same YAML output every time.
 
-Phase 1 W3 day 1-2: refine projections per atom against real Dify YAML schema.
-Phase 1 W3 day 3: read atom.projections.dify.template (Jinja2) instead of hardcoded.
+Phase 8 Day 2-3 will refine per-atom projections via atom.projections.dify.template.
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import yaml
 
-from app.core.pipelines.factory.ir import ResolvedDAG, ResolvedNode
+from app.core.pipelines.factory.ir import ResolvedDAG, ResolvedEdge, ResolvedNode
 from app.core.trace.bus import emit
 from app.registry.atom_loader import AtomDef, AtomLoaderImpl
 
 
-_NODE_TYPE_MAP = {
+_DIFY_DSL_VERSION = "0.4.0"
+
+# subcategory -> Dify node data.type
+_DATA_TYPE_MAP = {
     "DB": "code",
     "HTTP": "http-request",
     "LLM": "llm",
     "Notify": "http-request",
-    "Schedule": "scheduler",
-    "OCR": "tool",
-    "TTS": "tool",
-    "ASR": "tool",
-    "VectorDB": "tool",
-    "Embedding": "tool",
-    "DocParser": "tool",
+    "Schedule": "code",
+    "OCR": "code",
+    "TTS": "code",
+    "ASR": "code",
+    "VectorDB": "code",
+    "Embedding": "code",
+    "DocParser": "code",
     "Chart": "code",
-    "WebSearch": "tool",
+    "WebSearch": "code",
 }
+
+_NODE_X_BASE = 30
+_NODE_X_STEP = 304
+_NODE_Y = 245
+_NODE_W = 244
+_NODE_H = 90
 
 
 class DifyCompilerImpl:
-    """V1 compiler. Output is Dify-shaped YAML; refine in Phase 1 W3."""
+    """V2 compiler. Output is Dify-compatible YAML (DSL v0.4.0+).
+
+    The synthetic Start/End nodes are auto-prepended/appended because Dify
+    requires every workflow to begin with a `start` node and end with `end`.
+    """
 
     def __init__(self, atom_loader: AtomLoaderImpl | None = None) -> None:
         self._atoms_by_id: dict[str, AtomDef] = {}
@@ -67,41 +105,79 @@ class DifyCompilerImpl:
         scoped_nodes = self._scope_nodes(dag)
         scoped_edges = self._scope_edges(dag, scoped_nodes)
 
-        rendered_nodes = [self._render_node(n) for n in scoped_nodes]
+        rendered_nodes: list[dict[str, Any]] = []
+        rendered_edges: list[dict[str, Any]] = []
+
+        start_id = "node_start"
+        end_id = "node_end"
+
+        rendered_nodes.append(self._build_start_node(start_id, position_index=0))
+
+        for i, n in enumerate(scoped_nodes, start=1):
+            rendered_nodes.append(self._render_node(n, position_index=i))
+
+        rendered_nodes.append(
+            self._build_end_node(
+                end_id,
+                upstream_id=scoped_nodes[-1].id if scoped_nodes else start_id,
+                position_index=len(scoped_nodes) + 1,
+            )
+        )
+
+        if scoped_nodes:
+            first = scoped_nodes[0]
+            last = scoped_nodes[-1]
+            rendered_edges.append(
+                self._build_edge(start_id, first.id, "start", self._data_type(first))
+            )
+            for e in scoped_edges:
+                src = next((n for n in scoped_nodes if n.id == e.from_node), None)
+                tgt = next((n for n in scoped_nodes if n.id == e.to_node), None)
+                if src and tgt:
+                    rendered_edges.append(
+                        self._build_edge(
+                            e.from_node,
+                            e.to_node,
+                            self._data_type(src),
+                            self._data_type(tgt),
+                        )
+                    )
+            rendered_edges.append(
+                self._build_edge(last.id, end_id, self._data_type(last), "end")
+            )
+        else:
+            rendered_edges.append(self._build_edge(start_id, end_id, "start", "end"))
 
         app_dict: dict[str, Any] = {
+            "version": _DIFY_DSL_VERSION,
+            "kind": "app",
             "app": {
                 "name": f"specimen_{dag.intent_ref[:30]}",
                 "mode": "workflow",
-                "description": f"Generated by agent-ops V2.0.0 factory; target={dag.target}",
+                "icon": "\U0001F916",
+                "icon_background": "#FFEAD5",
+                "description": (
+                    f"Generated by agent-ops V2.0.0 factory; "
+                    f"target={dag.target} pattern={dag.pattern_id or 'none'}"
+                ),
+                "use_icon_as_answer_icon": False,
             },
+            "dependencies": [],
             "workflow": {
+                "conversation_variables": [],
+                "environment_variables": [],
+                "features": {},
                 "graph": {
+                    "edges": rendered_edges,
                     "nodes": rendered_nodes,
-                    "edges": [
-                        {
-                            "id": f"{e.from_node}->{e.to_node}",
-                            "source": e.from_node,
-                            "target": e.to_node,
-                            "data": {
-                                "from_var": e.from_var,
-                                "to_var": e.to_var,
-                                "type_check": {
-                                    "from": e.type_check.from_type,
-                                    "to": e.type_check.to_type,
-                                },
-                                "needs_adapter": e.needs_adapter,
-                            },
-                        }
-                        for e in scoped_edges
-                    ],
+                    "viewport": {"x": 0, "y": 0, "zoom": 0.7},
                 },
-                "factory_metadata": {
-                    "intent_ref": dag.intent_ref,
-                    "pattern_id": dag.pattern_id,
-                    "target": dag.target,
-                    "issues": dag.issues,
-                },
+            },
+            "_factory_metadata": {
+                "intent_ref": dag.intent_ref,
+                "pattern_id": dag.pattern_id,
+                "target": dag.target,
+                "issues": dag.issues,
             },
         }
         out = yaml.safe_dump(
@@ -123,17 +199,112 @@ class DifyCompilerImpl:
             return [n for n in dag.nodes if n.id in ids]
         return list(dag.nodes)
 
-    def _scope_edges(self, dag, scoped_nodes):
+    def _scope_edges(
+        self, dag: ResolvedDAG, scoped_nodes: list[ResolvedNode]
+    ) -> list[ResolvedEdge]:
         ids = {n.id for n in scoped_nodes}
         return [e for e in dag.edges if e.from_node in ids and e.to_node in ids]
 
-    def _render_node(self, node: ResolvedNode) -> dict[str, Any]:
+    def _data_type(self, node: ResolvedNode) -> str:
         atom = self._atoms_by_id.get(node.asset_id)
-        subcategory = atom.subcategory if atom else "Unknown"
-        node_type = _NODE_TYPE_MAP.get(subcategory, "code")
+        sub = atom.subcategory if atom else "Unknown"
+        return _DATA_TYPE_MAP.get(sub, "code")
+
+    def _node_position(self, index: int) -> dict[str, int]:
+        return {"x": _NODE_X_BASE + index * _NODE_X_STEP, "y": _NODE_Y}
+
+    def _build_start_node(self, node_id: str, position_index: int) -> dict[str, Any]:
+        pos = self._node_position(position_index)
+        return {
+            "id": node_id,
+            "type": "custom",
+            "position": pos,
+            "positionAbsolute": dict(pos),
+            "width": _NODE_W,
+            "height": _NODE_H,
+            "sourcePosition": "right",
+            "targetPosition": "left",
+            "selected": False,
+            "data": {
+                "type": "start",
+                "title": "Start",
+                "desc": "",
+                "selected": False,
+                "variables": [],
+            },
+        }
+
+    def _build_end_node(
+        self, node_id: str, upstream_id: str, position_index: int
+    ) -> dict[str, Any]:
+        pos = self._node_position(position_index)
+        return {
+            "id": node_id,
+            "type": "custom",
+            "position": pos,
+            "positionAbsolute": dict(pos),
+            "width": _NODE_W,
+            "height": _NODE_H,
+            "sourcePosition": "right",
+            "targetPosition": "left",
+            "selected": False,
+            "data": {
+                "type": "end",
+                "title": "End",
+                "desc": "",
+                "selected": False,
+                "outputs": [
+                    {
+                        "value_selector": [upstream_id, "text"],
+                        "value_type": "string",
+                        "variable": "result",
+                    }
+                ],
+            },
+        }
+
+    def _build_edge(
+        self, source_id: str, target_id: str, source_type: str, target_type: str
+    ) -> dict[str, Any]:
+        return {
+            "id": f"{source_id}-source-{target_id}-target",
+            "source": source_id,
+            "sourceHandle": "source",
+            "target": target_id,
+            "targetHandle": "target",
+            "type": "custom",
+            "zIndex": 0,
+            "data": {
+                "isInIteration": False,
+                "isInLoop": False,
+                "sourceType": source_type,
+                "targetType": target_type,
+            },
+        }
+
+    def _render_node(self, node: ResolvedNode, position_index: int) -> dict[str, Any]:
+        atom = self._atoms_by_id.get(node.asset_id)
+        sub = atom.subcategory if atom else "Unknown"
+        data_type = _DATA_TYPE_MAP.get(sub, "code")
+        title = atom.name if atom else node.asset_id
+
+        pos = self._node_position(position_index)
 
         data: dict[str, Any] = {
-            "title": atom.name if atom else node.asset_id,
+            "type": data_type,
+            "title": title,
+            "desc": node.selection_reason[:200],
+            "selected": False,
+        }
+
+        if data_type == "llm":
+            data.update(self._llm_data(node))
+        elif data_type == "http-request":
+            data.update(self._http_data(node))
+        else:
+            data.update(self._code_data(node))
+
+        data["_factory"] = {
             "asset_id": node.asset_id,
             "asset_version": node.asset_version,
             "selection_reason": node.selection_reason,
@@ -141,19 +312,80 @@ class DifyCompilerImpl:
             "inputs": node.inputs,
             "params": node.params,
         }
-        if subcategory == "LLM":
-            data["llm_routing"] = {
+
+        return {
+            "id": node.id,
+            "type": "custom",
+            "position": pos,
+            "positionAbsolute": dict(pos),
+            "width": _NODE_W,
+            "height": _NODE_H,
+            "sourcePosition": "right",
+            "targetPosition": "left",
+            "selected": False,
+            "data": data,
+        }
+
+    def _llm_data(self, node: ResolvedNode) -> dict[str, Any]:
+        task_key = (node.llm_task_type or "").replace(" ", "_").replace("/", "")
+        size = node.llm_size or ""
+        model_placeholder = f"${{RUIDONG_MODEL_FOR_{task_key}_{size}}}"
+
+        prompts: list[dict[str, Any]] = [
+            {
+                "id": str(uuid.uuid4()),
+                "role": "system",
+                "text": (
+                    f"prompt_id={node.prompt_id} (resolved at runtime via prompt registry)"
+                    if node.prompt_id
+                    else ""
+                ),
+            }
+        ]
+        for in_var in node.inputs.keys():
+            prompts.append({"role": "user", "text": f"{{{{#{in_var}#}}}}"})
+
+        return {
+            "model": {
+                "provider": "langgenius/openai_api_compatible/openai_api_compatible",
+                "name": model_placeholder,
+                "mode": "chat",
+                "completion_params": {"temperature": 0.7},
+            },
+            "prompt_template": prompts,
+            "context": {"enabled": False, "variable_selector": []},
+            "vision": {"enabled": False},
+            "variables": [],
+            "_llm_routing": {
                 "task_type": node.llm_task_type,
                 "size": node.llm_size,
                 "fallback_chain": node.llm_fallback_chain,
-                "model_placeholder": (
-                    f"${{RUIDONG_MODEL_FOR_{(node.llm_task_type or '').replace(' ', '_').replace('/', '')}_{node.llm_size or ''}}}"
-                ),
-            }
-            if node.prompt_id:
-                data["prompt_id"] = node.prompt_id
+                "prompt_id": node.prompt_id,
+            },
+        }
+
+    def _http_data(self, node: ResolvedNode) -> dict[str, Any]:
         return {
-            "id": node.id,
-            "type": node_type,
-            "data": data,
+            "method": node.params.get("method", "POST"),
+            "url": node.params.get("url", "${PLACEHOLDER_URL}"),
+            "headers": node.params.get("headers", ""),
+            "params": "",
+            "body": {"type": "json", "data": []},
+            "timeout": {"max_connect_timeout": 0, "max_read_timeout": 0, "max_write_timeout": 0},
+            "authorization": {"type": "no-auth", "config": None},
+            "variables": [],
+        }
+
+    def _code_data(self, node: ResolvedNode) -> dict[str, Any]:
+        return {
+            "code_language": "python3",
+            "code": (
+                f"# placeholder for atom={node.asset_id} (subcategory binding incomplete)\n"
+                f"def main(**kwargs):\n"
+                f"    return {{'result': str(kwargs)}}\n"
+            ),
+            "variables": [
+                {"variable": k, "value_selector": []} for k in node.inputs.keys()
+            ],
+            "outputs": {"result": {"type": "string"}},
         }
