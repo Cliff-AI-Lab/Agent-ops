@@ -473,6 +473,20 @@ def main(argv: list[str] | None = None) -> int:
     p_rank.add_argument("--db", default=None, help="harness.db 路径; 默认仓库根")
     p_rank.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_wiki = sub.add_parser(
+        "wiki-sync",
+        help="V2.7 W1 D2 同步 db reuse 数据到 Obsidian 资产中心 markdown",
+    )
+    p_wiki.add_argument("--to", default="obsidian", choices=["obsidian"],
+                        help="目标(暂只支持 obsidian)")
+    p_wiki.add_argument("--vault-path", default=None,
+                        help="Obsidian 资产中心目录路径; 默认 $FACTORY_ASSET_CENTER")
+    p_wiki.add_argument("--layer", default="atom.",
+                        help="layer prefix; 默认 'atom.'")
+    p_wiki.add_argument("--top", type=int, default=None, help="只渲染前 N 个")
+    p_wiki.add_argument("--db", default=None, help="harness.db 路径; 默认仓库根")
+    p_wiki.add_argument("--json", action="store_true", help="机器可读输出")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
@@ -739,6 +753,51 @@ def main(argv: list[str] | None = None) -> int:
                 hist = "yes" if r.has_history else "no"
                 spc = r.stats.specimen_count if r.stats else 0
                 print(f"{i:>4}  {r.score:>6.4f}  {hist:>4} {spc:>4}  {r.atom_id}")
+        return 0
+
+    if args.cmd == "wiki-sync":
+        from app.delivery.atom_score_service import AtomScoreService
+        from app.delivery.wiki_sync import WikiSync
+        from app.registry.atom_loader import AtomLoaderImpl
+
+        atoms_dir = _atoms_dir()
+        atoms = AtomLoaderImpl().load_all(atoms_dir) if atoms_dir.exists() else {}
+
+        db_arg = getattr(args, "db", None)
+        db_path = Path(db_arg) if db_arg else _default_harness_db_path()
+        if not db_path.exists():
+            print(f"[factory] harness.db not found: {db_path}", file=sys.stderr)
+            return 1
+
+        vault_arg = args.vault_path or os.getenv("FACTORY_ASSET_CENTER")
+        if not vault_arg:
+            print(
+                "[factory] --vault-path required (or set FACTORY_ASSET_CENTER); "
+                "e.g. --vault-path \"E:/Obsidian/Agent 工厂/资产中心\"",
+                file=sys.stderr,
+            )
+            return 1
+
+        svc = AtomScoreService.from_atom_loader(db_path, atoms)
+        sync = WikiSync(svc, db_path=db_path)
+        result = sync.sync_obsidian(
+            vault_path=vault_arg,
+            layer_prefix=args.layer,
+            top=args.top,
+        )
+
+        if args.json:
+            print(json.dumps({
+                "summary": str(result.summary_path),
+                "details": [str(p) for p in result.detail_paths],
+                "rendered_at": result.rendered_at,
+                "atoms_rendered": result.atoms_rendered,
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"[wiki-sync] rendered {result.atoms_rendered} atoms")
+            print(f"  summary: {result.summary_path}")
+            print(f"  details: {len(result.detail_paths)} files in {result.summary_path.parent}/atoms/")
+            print(f"  at:      {result.rendered_at}")
         return 0
 
     parser.error(f"unknown command: {args.cmd}")
