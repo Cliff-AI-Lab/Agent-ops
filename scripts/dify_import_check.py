@@ -31,6 +31,8 @@ Environment overrides (no hardcoded secrets):
 from __future__ import annotations
 
 import argparse
+import base64
+import http.cookiejar
 import json
 import os
 import sys
@@ -41,14 +43,21 @@ import urllib.error
 import urllib.request
 
 
-def _post_json(url: str, payload: dict, token: str | None = None, timeout: int = 30) -> tuple[int, dict]:
+# Dify 1.x stores access_token / refresh_token / csrf_token in HTTP cookies
+# instead of returning them in the response body. We use a single opener with
+# a cookiejar so that all subsequent requests (import, etc.) carry the session.
+_cookies = http.cookiejar.CookieJar()
+_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_cookies))
+
+
+def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: int = 30) -> tuple[int, dict]:
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             data = resp.read().decode("utf-8")
             return resp.getcode(), json.loads(data) if data else {}
     except urllib.error.HTTPError as e:
@@ -60,17 +69,24 @@ def _post_json(url: str, payload: dict, token: str | None = None, timeout: int =
         return e.code, parsed
 
 
-def _get_json(url: str, token: str | None = None, timeout: int = 10) -> tuple[int, dict]:
+def _get_json(url: str, headers: dict | None = None, timeout: int = 10) -> tuple[int, dict]:
     req = urllib.request.Request(url, method="GET")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             return resp.getcode(), json.loads(resp.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as e:
         return e.code, {"raw": e.read().decode("utf-8", errors="replace")}
     except urllib.error.URLError:
         return 0, {}
+
+
+def _cookie_value(name: str) -> str | None:
+    for c in _cookies:
+        if c.name == name:
+            return c.value
+    return None
 
 
 def wait_console_ready(base: str, max_wait: int = 300) -> bool:
@@ -100,32 +116,40 @@ def ensure_admin(base: str, email: str, name: str, password: str) -> bool:
     return code in (200, 201)
 
 
-def login(base: str, email: str, password: str) -> str | None:
+def login(base: str, email: str, password: str) -> bool:
+    # Dify console base64-encodes sensitive fields (libs/encryption.py
+    # FieldEncryption.decrypt_field). Not cryptographic - just transport-layer
+    # obfuscation. We must encode to match the @decrypt_password_field decorator.
+    encoded_pw = base64.b64encode(password.encode("utf-8")).decode("ascii")
     code, body = _post_json(
         f"{base}/console/api/login",
-        {"email": email, "password": password, "remember_me": False},
+        {"email": email, "password": encoded_pw, "remember_me": False},
     )
-    print(f"[login] HTTP {code}")
-    if code != 200:
-        print(f"[login] body: {body}")
-        return None
-    data = body.get("data", {})
-    token = data.get("access_token") or data.get("token")
-    if not token:
-        print(f"[login] no token in body: {body}")
-    return token
+    print(f"[login] HTTP {code}, body={body}")
+    if code != 200 or body.get("result") != "success":
+        return False
+    # Dify 1.x: tokens are in cookies (access_token / refresh_token / csrf_token).
+    cookies = sorted([c.name for c in _cookies])
+    print(f"[login] cookies set: {cookies}")
+    return _cookie_value("access_token") is not None or _cookie_value("session") is not None or len(cookies) > 0
 
 
-def import_yaml(base: str, token: str, yaml_text: str, app_name: str) -> tuple[int, dict]:
+def import_yaml(base: str, yaml_text: str, app_name: str) -> tuple[int, dict]:
     payload = {
         "mode": "yaml-content",
         "yaml_content": yaml_text,
         "name": app_name,
     }
+    headers: dict = {}
+    csrf = _cookie_value("csrf_token")
+    if csrf:
+        # Dify CSRF protection: header name varies by version; try common ones.
+        headers["X-CSRF-Token"] = csrf
+        headers["X-CSRFToken"] = csrf
     code, body = _post_json(
         f"{base}/console/api/apps/imports",
         payload,
-        token=token,
+        headers=headers,
         timeout=60,
     )
     return code, body
@@ -178,13 +202,11 @@ def main():
         print("[fatal] admin setup failed", file=sys.stderr)
         sys.exit(4)
 
-    token = login(base, email, password)
-    if not token:
+    if not login(base, email, password):
         print("[fatal] login failed", file=sys.stderr)
         sys.exit(5)
-    print(f"[login] token len={len(token)}")
 
-    code, body = import_yaml(base, token, yaml_text, args.name)
+    code, body = import_yaml(base, yaml_text, args.name)
     print(f"[import] HTTP {code}")
     print(json.dumps(body, ensure_ascii=False, indent=2))
 
