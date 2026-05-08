@@ -54,9 +54,41 @@ io_schema:
       model_fallback: { type: boolean, default: false }
 projections:
   dify:
-    compatible_dify_version: ">=0.6.0"
+    compatible_dify_version: ">=0.4.0"
     node_type: llm
-    template: "# Phase 1 W3 with ${RUIDONG_MODEL_FOR_*} placeholder"
+    # Jinja2 template -> YAML mapping (loaded into node.data block).
+    # Available context: atom (AtomDef), node (ResolvedNode), helpers
+    # (ruidong_model_placeholder, uuid).
+    template: |
+      type: llm
+      title: {{ atom.name | tojson }}
+      desc: {{ (node.selection_reason or '')[:200] | tojson }}
+      selected: false
+      variables: []
+      vision:
+        enabled: false
+      context:
+        enabled: false
+        variable_selector: []
+      model:
+        provider: langgenius/openai_api_compatible/openai_api_compatible
+        name: {{ helpers.ruidong_model_placeholder(node.llm_task_type, node.llm_size) | tojson }}
+        mode: chat
+        completion_params:
+          temperature: 0.7
+      prompt_template:
+        - id: {{ helpers.uuid() | tojson }}
+          role: system
+          text: {{ helpers.system_prompt(node) | tojson }}
+        {%- for in_var in (node.inputs.keys() | list) %}
+        - role: user
+          text: {{ ('{{#' ~ in_var ~ '#}}') | tojson }}
+        {%- endfor %}
+      _llm_routing:
+        task_type: {{ node.llm_task_type | tojson }}
+        size: {{ node.llm_size | tojson }}
+        fallback_chain: {{ node.llm_fallback_chain | tojson }}
+        prompt_id: {{ node.prompt_id | tojson }}
   n8n:
     compatible_n8n_version: ">=1.0"
     node_type: "@n8n/n8n-nodes-langchain.openAi"

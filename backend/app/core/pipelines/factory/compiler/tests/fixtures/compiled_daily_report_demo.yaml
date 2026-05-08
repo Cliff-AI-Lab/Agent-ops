@@ -98,19 +98,28 @@ workflow:
       data:
         type: code
         title: PostgreSQL 查询
-        desc: query sales_db
+        desc: 查 sales_db
         selected: false
         code_language: python3
-        code: "# placeholder for atom=atom.db.postgres.v1 (subcategory binding incomplete)\n\
-          def main(**kwargs):\n    return {'result': str(kwargs)}\n"
+        code: "import os, psycopg2, psycopg2.extras\ndef main(sql: str = \"\", params:\
+          \ dict = None) -> dict:\n    conn = psycopg2.connect(\n        host=os.environ.get(\"\
+          PG_HOST\", \"postgres\"),\n        port=int(os.environ.get(\"PG_PORT\",\
+          \ \"5432\")),\n        user=os.environ[\"PG_USER\"],\n        password=os.environ[\"\
+          PG_PASSWORD\"],\n        dbname=os.environ.get(\"PG_DB\", \"postgres\"),\n\
+          \    )\n    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)\n\
+          \    cur.execute(sql, params or {})\n    rows = [dict(r) for r in cur.fetchall()]\n\
+          \    cur.close(); conn.close()\n    return {\"rows\": rows, \"row_count\"\
+          : len(rows)}\n"
         variables: []
         outputs:
-          result:
-            type: string
+          rows:
+            type: array[object]
+          row_count:
+            type: number
         _factory:
           asset_id: atom.db.postgres.v1
           asset_version: 1.0.0
-          selection_reason: query sales_db
+          selection_reason: 查 sales_db
           confidence: 0.9
           inputs: {}
           params: {}
@@ -130,35 +139,35 @@ workflow:
       data:
         type: llm
         title: LLM 通用对话
-        desc: summarize
+        desc: 总结日报
         selected: false
+        variables: []
+        vision:
+          enabled: false
+        context:
+          enabled: false
+          variable_selector: []
         model:
           provider: langgenius/openai_api_compatible/openai_api_compatible
-          name: ${RUIDONG_MODEL_FOR_summarize_中}
+          name: ${RUIDONG_MODEL_FOR_通用对话_中}
           mode: chat
           completion_params:
             temperature: 0.7
         prompt_template:
-        - id: 3436e2e6-9564-4e05-9bb5-2a68cc396201
+        - id: ff4642a5-7a52-4681-9dc1-0f45e9542177
           role: system
-          text: ''
-        context:
-          enabled: false
-          variable_selector: []
-        vision:
-          enabled: false
-        variables: []
+          text: prompt_id=prompt.daily_report.v1 (resolved at runtime via prompt registry)
         _llm_routing:
-          task_type: summarize
+          task_type: 通用对话
           size: 中
           fallback_chain:
           - 中
           - 大
-          prompt_id: null
+          prompt_id: prompt.daily_report.v1
         _factory:
           asset_id: atom.llm.chat.v1
           asset_version: 1.0.0
-          selection_reason: summarize
+          selection_reason: 总结日报
           confidence: 0.9
           inputs: {}
           params: {}
@@ -178,19 +187,27 @@ workflow:
       data:
         type: http-request
         title: 钉钉机器人推送
-        desc: dingtalk
+        desc: 发钉钉
         selected: false
         method: POST
-        url: ${PLACEHOLDER_URL}
-        headers: ''
+        url: ${DINGTALK_WEBHOOK_URL}
+        headers: 'Content-Type: application/json'
         params: ''
         body:
           type: json
-          data: []
+          data:
+          - key: msgtype
+            type: text
+            value: markdown
+          - key: markdown
+            type: object
+            value:
+              title: 工厂日报
+              text: ${content}
         timeout:
-          max_connect_timeout: 0
-          max_read_timeout: 0
-          max_write_timeout: 0
+          max_connect_timeout: 5
+          max_read_timeout: 10
+          max_write_timeout: 5
         authorization:
           type: no-auth
           config: null
@@ -198,7 +215,7 @@ workflow:
         _factory:
           asset_id: atom.notify.dingtalk.v1
           asset_version: 1.0.0
-          selection_reason: dingtalk
+          selection_reason: 发钉钉
           confidence: 0.9
           inputs: {}
           params: {}

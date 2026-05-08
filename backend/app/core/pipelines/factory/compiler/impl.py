@@ -38,14 +38,18 @@ Phase 8 Day 2-3 will refine per-atom projections via atom.projections.dify.templ
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
+import jinja2
 import yaml
 
 from app.core.pipelines.factory.ir import ResolvedDAG, ResolvedEdge, ResolvedNode
 from app.core.trace.bus import emit
 from app.registry.atom_loader import AtomDef, AtomLoaderImpl
+
+logger = logging.getLogger(__name__)
 
 
 _DIFY_DSL_VERSION = "0.4.0"
@@ -72,6 +76,37 @@ _NODE_X_STEP = 304
 _NODE_Y = 245
 _NODE_W = 244
 _NODE_H = 90
+
+
+class _TemplateHelpers:
+    """Jinja2 context helpers for atom Dify templates.
+
+    Atom yaml templates reference these as ``helpers.xxx``. Centralized so
+    every atom emits the same shape (model placeholder, system prompt,
+    code-node variables) without duplicating logic in 5 yaml files.
+    """
+
+    @staticmethod
+    def ruidong_model_placeholder(task_type: str | None, size: str | None) -> str:
+        task_key = (task_type or "").replace(" ", "_").replace("/", "")
+        return f"${{RUIDONG_MODEL_FOR_{task_key}_{size or ''}}}"
+
+    @staticmethod
+    def uuid() -> str:
+        return str(uuid.uuid4())
+
+    @staticmethod
+    def system_prompt(node: ResolvedNode) -> str:
+        if node.prompt_id:
+            return f"prompt_id={node.prompt_id} (resolved at runtime via prompt registry)"
+        return ""
+
+    @staticmethod
+    def code_variables(node: ResolvedNode) -> list[dict[str, Any]]:
+        return [{"variable": k, "value_selector": []} for k in node.inputs.keys()]
+
+
+_HELPERS = _TemplateHelpers()
 
 
 class DifyCompilerImpl:
@@ -284,25 +319,11 @@ class DifyCompilerImpl:
 
     def _render_node(self, node: ResolvedNode, position_index: int) -> dict[str, Any]:
         atom = self._atoms_by_id.get(node.asset_id)
-        sub = atom.subcategory if atom else "Unknown"
-        data_type = _DATA_TYPE_MAP.get(sub, "code")
-        title = atom.name if atom else node.asset_id
-
         pos = self._node_position(position_index)
 
-        data: dict[str, Any] = {
-            "type": data_type,
-            "title": title,
-            "desc": node.selection_reason[:200],
-            "selected": False,
-        }
-
-        if data_type == "llm":
-            data.update(self._llm_data(node))
-        elif data_type == "http-request":
-            data.update(self._http_data(node))
-        else:
-            data.update(self._code_data(node))
+        data = self._render_data_from_atom_template(atom, node)
+        if data is None:
+            data = self._render_data_builtin(atom, node)
 
         data["_factory"] = {
             "asset_id": node.asset_id,
@@ -325,6 +346,83 @@ class DifyCompilerImpl:
             "selected": False,
             "data": data,
         }
+
+    def _render_data_from_atom_template(
+        self, atom: AtomDef | None, node: ResolvedNode
+    ) -> dict[str, Any] | None:
+        """Try to render the atom's Dify projection template (Jinja2 -> YAML).
+
+        Returns None when the atom is unknown, has no Dify projection, the
+        projection is marked not_supported, or the template is a placeholder
+        / unparseable. Caller falls back to built-in rendering.
+        """
+        if atom is None:
+            return None
+        proj = atom.projections.get("dify")
+        if proj is None or proj.not_supported or not proj.template:
+            return None
+        tmpl_src = proj.template.strip()
+        # Skip legacy placeholder templates that pre-date Phase 8 Day 2.
+        if not tmpl_src or tmpl_src.startswith("# Phase"):
+            return None
+        try:
+            env = jinja2.Environment(
+                undefined=jinja2.StrictUndefined,
+                trim_blocks=False,
+                lstrip_blocks=False,
+                autoescape=False,
+            )
+            tmpl = env.from_string(proj.template)
+            rendered = tmpl.render(atom=atom, node=node, helpers=_HELPERS)
+            data = yaml.safe_load(rendered)
+        except (jinja2.TemplateError, yaml.YAMLError) as exc:
+            logger.warning(
+                "atom %s dify template render failed (%s); falling back to builtin",
+                atom.asset_id,
+                exc,
+            )
+            emit(
+                "L3",
+                "DifyCompiler",
+                "atom_template_fallback",
+                f"asset_id={atom.asset_id} reason={type(exc).__name__}",
+            )
+            return None
+        if not isinstance(data, dict):
+            logger.warning(
+                "atom %s dify template did not yield a mapping; got %s",
+                atom.asset_id,
+                type(data).__name__,
+            )
+            return None
+        emit(
+            "L3",
+            "DifyCompiler",
+            "atom_template_used",
+            f"asset_id={atom.asset_id} keys={sorted(data.keys())}",
+        )
+        return data
+
+    def _render_data_builtin(
+        self, atom: AtomDef | None, node: ResolvedNode
+    ) -> dict[str, Any]:
+        sub = atom.subcategory if atom else "Unknown"
+        data_type = _DATA_TYPE_MAP.get(sub, "code")
+        title = atom.name if atom else node.asset_id
+
+        data: dict[str, Any] = {
+            "type": data_type,
+            "title": title,
+            "desc": node.selection_reason[:200],
+            "selected": False,
+        }
+        if data_type == "llm":
+            data.update(self._llm_data(node))
+        elif data_type == "http-request":
+            data.update(self._http_data(node))
+        else:
+            data.update(self._code_data(node))
+        return data
 
     def _llm_data(self, node: ResolvedNode) -> dict[str, Any]:
         task_key = (node.llm_task_type or "").replace(" ", "_").replace("/", "")

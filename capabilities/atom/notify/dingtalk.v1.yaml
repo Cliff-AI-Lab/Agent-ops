@@ -37,9 +37,41 @@ io_schema:
       message_id: { type: string }
 projections:
   dify:
-    compatible_dify_version: ">=0.6.0"
-    node_type: http
-    template: "# Phase 1 W3"
+    compatible_dify_version: ">=0.4.0"
+    node_type: http-request
+    # Jinja2 -> YAML mapping; rendered into node.data block.
+    # DingTalk webhook is invoked via Dify's http-request node. The webhook
+    # token must be configured in Dify's environment_variables (do not inline
+    # secrets). Default msgtype is markdown because text gets truncated.
+    template: |
+      type: http-request
+      title: {{ atom.name | tojson }}
+      desc: {{ (node.selection_reason or '')[:200] | tojson }}
+      selected: false
+      method: POST
+      url: {{ (node.params.get('webhook_url') or '${DINGTALK_WEBHOOK_URL}') | tojson }}
+      headers: |-
+        Content-Type: application/json
+      params: ""
+      body:
+        type: json
+        data:
+          - key: msgtype
+            type: text
+            value: markdown
+          - key: markdown
+            type: object
+            value:
+              title: {{ (node.params.get('title') or '工厂日报') | tojson }}
+              text: {{ (node.params.get('text') or '${content}') | tojson }}
+      timeout:
+        max_connect_timeout: 5
+        max_read_timeout: 10
+        max_write_timeout: 5
+      authorization:
+        type: no-auth
+        config: null
+      variables: []
   n8n:
     compatible_n8n_version: ">=1.0"
     node_type: n8n-nodes-base.httpRequest

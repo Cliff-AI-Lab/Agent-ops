@@ -33,9 +33,30 @@ io_schema:
       status_code: { type: integer }
 projections:
   dify:
-    compatible_dify_version: ">=0.6.0"
-    node_type: http
-    template: "# Phase 1 W3"
+    compatible_dify_version: ">=0.4.0"
+    node_type: http-request
+    # Jinja2 -> YAML mapping; rendered into node.data block.
+    # node.params should carry method / url / headers / body when known.
+    template: |
+      type: http-request
+      title: {{ atom.name | tojson }}
+      desc: {{ (node.selection_reason or '')[:200] | tojson }}
+      selected: false
+      method: {{ (node.params.get('method') or 'POST') | tojson }}
+      url: {{ (node.params.get('url') or '${PLACEHOLDER_URL}') | tojson }}
+      headers: {{ (node.params.get('headers') or '') | tojson }}
+      params: ""
+      body:
+        type: {{ (node.params.get('body_type') or 'json') | tojson }}
+        data: []
+      timeout:
+        max_connect_timeout: 0
+        max_read_timeout: 0
+        max_write_timeout: 0
+      authorization:
+        type: no-auth
+        config: null
+      variables: []
   n8n:
     compatible_n8n_version: ">=1.0"
     node_type: n8n-nodes-base.httpRequest
