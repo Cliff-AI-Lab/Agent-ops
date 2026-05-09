@@ -482,6 +482,17 @@ def main(argv: list[str] | None = None) -> int:
     g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
     p_verify.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_lookup = sub.add_parser(
+        "wiki-lookup",
+        help="V2.8 Phase 10 W1 D1 用 NL 查 wiki_articles 找相似 specimen",
+    )
+    p_lookup.add_argument("--nl", required=True, help="自然语言需求")
+    p_lookup.add_argument("--top", type=int, default=3, help="top-k (默认 3)")
+    p_lookup.add_argument("--threshold", type=float, default=0.10, help="相似度阈值")
+    p_lookup.add_argument("--industry", default=None, help="过滤 industry_code")
+    p_lookup.add_argument("--db", default=None, help="harness.db 路径")
+    p_lookup.add_argument("--json", action="store_true", help="机器可读输出")
+
     p_wiki = sub.add_parser(
         "wiki-sync",
         help="V2.7 W1 D2 同步 db reuse 数据到 Obsidian 资产中心 markdown",
@@ -806,6 +817,37 @@ def main(argv: list[str] | None = None) -> int:
                     mark = "ok" if c.passed else "FAIL"
                     print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
         return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
+
+    if args.cmd == "wiki-lookup":
+        from dataclasses import asdict
+        from app.delivery.wiki_lookup import WikiLookup
+
+        db_arg = getattr(args, "db", None)
+        db_path = Path(db_arg) if db_arg else _default_harness_db_path()
+        if not db_path.exists():
+            print(f"[factory] harness.db not found: {db_path}", file=sys.stderr)
+            return 1
+
+        lk = WikiLookup(db_path, threshold=args.threshold)
+        hits = lk.find_similar(args.nl, top_k=args.top, industry_filter=args.industry)
+
+        if args.json:
+            print(json.dumps(
+                [asdict(h) for h in hits],
+                ensure_ascii=False, indent=2,
+            ))
+        else:
+            print(f"[wiki-lookup] nl={args.nl!r} threshold={args.threshold} top={args.top}")
+            if not hits:
+                print("  (no hits - factory should build from scratch)")
+            for i, h in enumerate(hits, 1):
+                print(f"  {i}. {h.short_line()}")
+                if h.atom_ids:
+                    print(f"      atoms: {', '.join(h.atom_ids[:5])}"
+                          + (" ..." if len(h.atom_ids) > 5 else ""))
+                if h.matched_terms:
+                    print(f"      matched: {' '.join(h.matched_terms[:8])}")
+        return 0 if hits else 4
 
     if args.cmd == "wiki-sync":
         from app.delivery.atom_score_service import AtomScoreService
