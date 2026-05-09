@@ -482,6 +482,32 @@ def main(argv: list[str] | None = None) -> int:
     g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
     p_verify.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_pipe = sub.add_parser(
+        "pipeline",
+        help="V2.8 Phase 10 双路径闭环:NL → wiki → (build → deploy) ± canvas",
+    )
+    p_pipe.add_argument("--nl", required=True, help="自然语言需求")
+    p_pipe.add_argument("--specimen-id", required=True, help="生产单 ID")
+    p_pipe.add_argument(
+        "--canvas",
+        default="none",
+        choices=["none", "dify"],
+        help="路径选择:none=直发(默认),dify=经 Dify 画布人工确认 (Day 3+)",
+    )
+    p_pipe.add_argument("--target", default="dify", choices=["dify"],
+                        help="部署目标")
+    p_pipe.add_argument("--dify-base", default=None, help="Dify base URL")
+    p_pipe.add_argument("--lookup-threshold", type=float, default=0.05,
+                        help="wiki 相似度命中阈值(V0 Jaccard 默认 0.05;W2 升 embedding 后再调)")
+    p_pipe.add_argument("--lookup-top", type=int, default=3,
+                        help="wiki top-k")
+    p_pipe.add_argument("--skip-lookup", action="store_true",
+                        help="跳过 wiki 前置查询")
+    p_pipe.add_argument("--auto-continue", action="store_true",
+                        help="canvas hold 时自动续(CI 模式)")
+    p_pipe.add_argument("--name", default=None, help="Dify app name override")
+    p_pipe.add_argument("--json", action="store_true", help="机器可读输出")
+
     p_lookup = sub.add_parser(
         "wiki-lookup",
         help="V2.8 Phase 10 W1 D1 用 NL 查 wiki_articles 找相似 specimen",
@@ -817,6 +843,106 @@ def main(argv: list[str] | None = None) -> int:
                     mark = "ok" if c.passed else "FAIL"
                     print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
         return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
+
+    if args.cmd == "pipeline":
+        from dataclasses import asdict
+        from app.core.trace.bus import emit
+        from app.delivery.dify_publisher import DifyPublisher
+        from app.delivery.wiki_lookup import WikiLookup
+
+        db_path = _default_harness_db_path()
+        # ----- Stage 1: wiki lookup (unless --skip-lookup) -----
+        hits: list = []
+        if not args.skip_lookup and db_path.exists():
+            try:
+                lk = WikiLookup(db_path, threshold=args.lookup_threshold)
+                hits = lk.find_similar(args.nl, top_k=args.lookup_top)
+            except FileNotFoundError:
+                hits = []
+        if hits:
+            emit("L3", "Pipeline", "wiki_hit",
+                 f"specimen={args.specimen_id} top={hits[0].system_slug} sim={hits[0].similarity:.4f}")
+            print(f"[pipeline] wiki HIT: {len(hits)} candidate(s) found")
+            for i, h in enumerate(hits, 1):
+                print(f"  {i}. {h.short_line()}")
+                if h.atom_ids:
+                    print(f"      atoms used: {', '.join(h.atom_ids[:5])}")
+            print("[pipeline] continuing to build (clone path is Phase 10 W2)")
+        else:
+            emit("L3", "Pipeline", "wiki_miss",
+                 f"specimen={args.specimen_id} nl_chars={len(args.nl)}")
+            print("[pipeline] wiki MISS: no similar specimen, building from scratch")
+
+        # ----- Stage 2: route -----
+        emit("L3", "Pipeline", "route_taken",
+             f"specimen={args.specimen_id} path={'B' if args.canvas != 'none' else 'A'} canvas={args.canvas}")
+        print(f"[pipeline] route: path {'B (canvas=' + args.canvas + ')' if args.canvas != 'none' else 'A (direct)'}")
+
+        # ----- Stage 3: build -----
+        try:
+            build_result = asyncio.run(_run_build(args.nl))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[pipeline] build failed: {exc}", file=sys.stderr)
+            return 4
+        outputs = build_result.get("outputs", {})
+        yaml_text = outputs.get("dify") or build_result.get("dsl") or ""
+        if not yaml_text:
+            print("[pipeline] build produced no Dify YAML", file=sys.stderr)
+            return 4
+        print(f"[pipeline] built {len(yaml_text)} chars from NL")
+
+        # ----- Stage 4: deploy -----
+        publisher = DifyPublisher(base_url=args.dify_base)
+        try:
+            res = publisher.publish(args.specimen_id, yaml_text, app_name=args.name)
+        except RuntimeError as exc:
+            print(f"[pipeline] deploy failed: {exc}", file=sys.stderr)
+            return 4
+        tag = "FIRST" if res.is_first_deploy else f"REDEPLOY (count={res.deploy_count})"
+        print(f"[pipeline] deploy {tag} app_id={res.dify_app_id} status={res.status}")
+
+        # ----- Stage 5: route-specific tail -----
+        if args.canvas == "none":
+            emit("L3", "Pipeline", "final_deployed",
+                 f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=false")
+            print("[pipeline] DONE (path A · direct release)")
+            if args.json:
+                print(json.dumps({
+                    "path": "A",
+                    "wiki_hits": [asdict(h) for h in hits],
+                    "deploy": asdict(res),
+                }, ensure_ascii=False, indent=2, default=str))
+            return 0 if not res.error else 4
+
+        # canvas == "dify" path B - hold + reverse留 Day 3/4
+        view_url = f"{publisher.base_url}/app/{res.dify_app_id}/workflow"
+        emit("L3", "Pipeline", "canvas_hold",
+             f"specimen={args.specimen_id} view_url={view_url}")
+        print(f"[pipeline] canvas HOLD: open {view_url}")
+        print("[pipeline] edit the workflow in Dify Studio, then press Enter to continue")
+        if args.auto_continue:
+            print("[pipeline] --auto-continue set; skipping hold")
+        else:
+            try:
+                input("[pipeline] >>> press Enter when done editing... ")
+            except (EOFError, KeyboardInterrupt):
+                print("[pipeline] hold aborted")
+                return 130
+
+        # Day 3/4 will plug ReverseCompiler here. For Day 2 we stop after hold
+        # so the trace event is observable end-to-end already.
+        emit("L3", "Pipeline", "final_deployed",
+             f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=pending_reverse_compile")
+        print("[pipeline] HOLD released. Phase 10 Day 4 will add ReverseCompiler diff + 二次 deploy.")
+        if args.json:
+            print(json.dumps({
+                "path": "B",
+                "wiki_hits": [asdict(h) for h in hits],
+                "deploy": asdict(res),
+                "view_url": view_url,
+                "reverse_compile": "deferred to Phase 10 Day 4",
+            }, ensure_ascii=False, indent=2, default=str))
+        return 0
 
     if args.cmd == "wiki-lookup":
         from dataclasses import asdict
