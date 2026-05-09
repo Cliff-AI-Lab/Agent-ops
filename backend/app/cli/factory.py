@@ -473,6 +473,15 @@ def main(argv: list[str] | None = None) -> int:
     p_rank.add_argument("--db", default=None, help="harness.db 路径; 默认仓库根")
     p_rank.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_verify = sub.add_parser(
+        "atom-verify",
+        help="V2.7.1 Phase 9 W2 atom 静态健康检查 (yaml/template/test_cases/...) 输出 pass_rate",
+    )
+    g_v = p_verify.add_mutually_exclusive_group(required=True)
+    g_v.add_argument("--atom", help="单个 asset_id, e.g. atom.llm.chat.v1")
+    g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
+    p_verify.add_argument("--json", action="store_true", help="机器可读输出")
+
     p_wiki = sub.add_parser(
         "wiki-sync",
         help="V2.7 W1 D2 同步 db reuse 数据到 Obsidian 资产中心 markdown",
@@ -754,6 +763,49 @@ def main(argv: list[str] | None = None) -> int:
                 spc = r.stats.specimen_count if r.stats else 0
                 print(f"{i:>4}  {r.score:>6.4f}  {hist:>4} {spc:>4}  {r.atom_id}")
         return 0
+
+    if args.cmd == "atom-verify":
+        from dataclasses import asdict
+        from app.delivery.atom_health_verifier import AtomHealthVerifier
+        from app.registry.atom_loader import AtomLoaderImpl
+
+        atoms_dir = _atoms_dir()
+        if not atoms_dir.exists():
+            print(f"[factory] atoms dir missing: {atoms_dir}", file=sys.stderr)
+            return 1
+        atoms = AtomLoaderImpl().load_all(atoms_dir)
+
+        verifier = AtomHealthVerifier()
+        if args.all:
+            reports = verifier.verify_all(atoms)
+        else:
+            atom = atoms.get(args.atom)
+            if atom is None:
+                print(f"[factory] unknown atom: {args.atom}", file=sys.stderr)
+                return 1
+            reports = [verifier.verify(atom)]
+
+        if args.json:
+            print(json.dumps(
+                [{"asset_id": r.asset_id, "pass_rate": r.pass_rate,
+                  "passed": r.passed_count, "total": r.total_count,
+                  "verified_at": r.verified_at,
+                  "checks": [
+                      {"name": c.name, "weight": c.weight,
+                       "passed": c.passed, "detail": c.detail}
+                      for c in r.checks
+                  ]}
+                 for r in reports],
+                ensure_ascii=False, indent=2,
+            ))
+        else:
+            print(f"{'pass_rate':>10} {'passed':>7} atom_id")
+            for r in reports:
+                print(f"{r.pass_rate:>10.4f} {r.passed_count:>3}/{r.total_count}    {r.asset_id}")
+                for c in r.checks:
+                    mark = "ok" if c.passed else "FAIL"
+                    print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
+        return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
 
     if args.cmd == "wiki-sync":
         from app.delivery.atom_score_service import AtomScoreService
