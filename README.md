@@ -2,7 +2,7 @@
 
 **A deterministic, auditable factory pipeline that takes a sentence of natural language and produces a deployable Dify workflow — with a self-reinforcing reuse loop on its parts library.**
 
-> Status: **V2.7.0** (Phase 9 W1 GA) on branch `feat/v2.0.0-factory`
+> Status: **V2.8.0** (Phase 10 W1 GA · two-path lights-out pipeline) on branch `feat/v2.0.0-factory`
 > Tracker: [`Agent ops V2.0.0` Obsidian workboard](#) · GitHub: [Cliff-AI-Lab/Agent-ops](https://github.com/Cliff-AI-Lab/Agent-ops)
 
 ---
@@ -66,8 +66,11 @@ Open the Agent Ops workspace UI at `http://127.0.0.1:8000` (after `uv run uvicor
 | **`atom-score <id>`** | **Phase 9 W1 Day 1** | **Per-atom usage score (the reuse-loop feedback)** |
 | **`atom-rank --layer atom.`** | **Phase 9 W1 Day 1** | **Rank atoms by real-world utility** |
 | **`wiki-sync --to obsidian --vault-path PATH`** | **Phase 9 W1 Day 2** | **Render reuse data into Obsidian asset center** |
+| **`atom-verify [--atom ID \| --all]`** | **Phase 9 W2** | **Static health probe on each atom yaml (5 checks → pass_rate)** |
+| **`wiki-lookup --nl "..."`** | **Phase 10 W1 D1** | **Find similar prior specimens before building from scratch** |
+| **`pipeline --nl "..." --canvas none\|dify`** | **Phase 10 W1 GA** | **Two-path lights-out flow: NL→wiki→build→deploy (±canvas hold + reverse-compile)** |
 
-Bold rows are the lights-out additions (Phase 8 / 9).
+Bold rows are the lights-out additions (Phase 8 / 9 / 10).
 
 ### Reuse score signal (opt-in)
 
@@ -100,7 +103,8 @@ Cold-start atoms (zero history) are unaffected.
 | 7 | Multi-agent + 12 industry designers (OpenAI Agents SDK) | done | V2.1.0 |
 | 8 | Dify lights-out publish (compiler V2 + atom Jinja2 + `factory deploy`) | done | **V2.6.0-day3** |
 | 8b | Three-pane Coding IDE view (factory canvas) | paused | — |
-| **9** | **Asset wiki + reuse-feedback loop (`AtomScoreService` + WikiSync + Resolver signal)** | **W1 GA** | **V2.7.0** |
+| **9** | **Asset wiki + reuse-feedback loop (`AtomScoreService` + WikiSync + Resolver signal + HealthVerifier)** | W1 GA + W2 partial | V2.7.0 + W2 part |
+| **10** | **Two-path lights-out pipeline (NL → wiki → build → deploy ± canvas hold + reverse-compile)** | **W1 GA** | **V2.8.0** |
 
 See [`Agent 工厂/进度看板/`](https://github.com/Cliff-AI-Lab/Agent-ops/tree/feat/v2.0.0-factory) for the full Obsidian-style workboard (decision log, per-phase plans, daily notes).
 
@@ -174,14 +178,43 @@ The resolver consumes this score as an additive signal next to LLM confidence �
 
 ## Recent commits on `feat/v2.0.0-factory`
 
-- **V2.7.0 / Phase 9 W1 Day 3** — Resolver score signal (env-gated) + pipeline wire-up
-- Phase 9 W1 Day 2 — `WikiSync` to Obsidian + `factory wiki-sync` CLI
-- Phase 9 W1 Day 1 — `AtomScoreService` + CLI `atom-score / atom-rank`
-- Phase 8 Day 3 — `harness factory deploy` + `DifyPublisher` + drift-check
-- Phase 8 Day 2 — atom-level Jinja2 Dify projections (5 atoms)
-- Phase 8 Day 1 — Dify v0.4.0 DSL alignment + import-check tool
+- **V2.8.0 / Phase 10 W1 GA** — Two-path lights-out pipeline (NL → wiki → build → deploy ± canvas hold + reverse-compile)
+  - Day 4 — `ReverseCompiler` MVP + Path B reverse-compile end-to-end
+  - Day 2 — `factory pipeline` orchestrator + Path A end-to-end
+  - Day 1 — `WikiLookup` Jaccard V0 + `factory wiki-lookup` CLI
+- Phase 9 W2 — `AtomHealthVerifier` + `factory atom-verify` (5-check static probe)
+- V2.7.0 / Phase 9 W1 GA — Resolver score signal + WikiSync + AtomScoreService
+- V2.6.0-day3 / Phase 8 GA — `harness factory deploy` + `DifyPublisher` + drift-check
 - V2.4.0 — asset dependency graph
 - V2.3.0 — Phase 6 W4 (tiktoken + soft-warn budget)
+
+## Two-path pipeline at a glance (Phase 10 W1 GA)
+
+```
+NL ──► wiki-lookup (V2.7) ─┬─ HIT  → suggest reuse (clone path = Phase 10 W2)
+                           └─ MISS → continue to fresh build
+                                  │
+                  ┌───────────────┴───────────────┐
+                  │  --canvas none (default)      │  --canvas dify
+                  │  Path A · direct release      │  Path B · canvas-in-the-loop
+                  └───────────────┬───────────────┘
+                                  │                              │
+   build → deploy → final_deployed   build → deploy → CanvasHold
+                                                   → drift fetch
+                                                   → ReverseCompiler.diff
+                                                   → final_deployed(human_tuned)
+
+   trace: wiki_hit/miss → route_taken → [canvas_hold] → [reverse_compiled]
+                                                     → final_deployed
+```
+
+Six lifecycle events on the trace bus make the whole flow observable
+(Phase 8b three-pane IDE, when revived, will subscribe directly).
+
+Phase 10 W2 (next): `--mode auto|single|multi` for multi-agent path,
+`AgentDependencyAnalyzer`, and `multi_agent_dependency_impact` trace
+event so changing one specialist surfaces its blast radius across
+the others.
 
 ---
 
