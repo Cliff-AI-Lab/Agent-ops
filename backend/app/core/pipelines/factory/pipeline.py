@@ -19,6 +19,7 @@ can persist them for trace replay.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -64,10 +65,24 @@ class FactoryPipeline:
         if resolver is None:
             search = SearchEngineImpl()
             search.index(atoms.values())
+            # Phase 9 W1 Day 3: optional reuse-feedback signal.
+            # Opt-in via env var to keep ES-001/ES-002 baselines stable on
+            # systems without a populated wiki_articles + qa_runs history.
+            score_service = None
+            if os.getenv("FACTORY_SCORE_SIGNAL", "0") == "1":
+                from pathlib import Path as _Path
+                from app.delivery.atom_score_service import AtomScoreService
+                db_path_env = os.getenv("HARNESS_DB_PATH")
+                db_path = _Path(db_path_env) if db_path_env else (
+                    _Path(__file__).resolve().parents[5] / "harness.db"
+                )
+                if db_path.exists():
+                    score_service = AtomScoreService.from_atom_loader(db_path, atoms)
             resolver = ResolverImpl(
                 search_engine=search,
                 llm_client=self._llm,
                 model_router=self._router,
+                score_service=score_service,
             )
         if compiler is None:
             compiler = DifyCompilerImpl()

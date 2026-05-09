@@ -2,7 +2,7 @@
 
 **A deterministic, auditable factory pipeline that takes a sentence of natural language and produces a deployable Dify workflow — with a self-reinforcing reuse loop on its parts library.**
 
-> Status: V2.7.0-day1 (Phase 9 W1 Day 1) on branch `feat/v2.0.0-factory`
+> Status: **V2.7.0** (Phase 9 W1 GA) on branch `feat/v2.0.0-factory`
 > Tracker: [`Agent ops V2.0.0` Obsidian workboard](#) · GitHub: [Cliff-AI-Lab/Agent-ops](https://github.com/Cliff-AI-Lab/Agent-ops)
 
 ---
@@ -65,8 +65,25 @@ Open the Agent Ops workspace UI at `http://127.0.0.1:8000` (after `uv run uvicor
 | **`drift-check`** | **Phase 8 Day 3** | **Detect human edits in Dify (one-way push boundary)** |
 | **`atom-score <id>`** | **Phase 9 W1 Day 1** | **Per-atom usage score (the reuse-loop feedback)** |
 | **`atom-rank --layer atom.`** | **Phase 9 W1 Day 1** | **Rank atoms by real-world utility** |
+| **`wiki-sync --to obsidian --vault-path PATH`** | **Phase 9 W1 Day 2** | **Render reuse data into Obsidian asset center** |
 
 Bold rows are the lights-out additions (Phase 8 / 9).
+
+### Reuse score signal (opt-in)
+
+The resolver picks atoms with strong real-world usage history first when the
+`FACTORY_SCORE_SIGNAL=1` environment variable is set. Off by default so
+ES-001 / ES-002 baselines stay reproducible on a fresh deploy. Once the
+factory has accumulated wiki + QA history, turn it on:
+
+```bash
+export FACTORY_SCORE_SIGNAL=1
+uv run harness factory build "..."
+# trace stream now carries score_signal_applied(asset_id, base, score, final)
+```
+
+The lift is `final = base * (1 + 0.2 * score)`, clamped to `[0,1]`.
+Cold-start atoms (zero history) are unaffected.
 
 ---
 
@@ -83,7 +100,7 @@ Bold rows are the lights-out additions (Phase 8 / 9).
 | 7 | Multi-agent + 12 industry designers (OpenAI Agents SDK) | done | V2.1.0 |
 | 8 | Dify lights-out publish (compiler V2 + atom Jinja2 + `factory deploy`) | done | **V2.6.0-day3** |
 | 8b | Three-pane Coding IDE view (factory canvas) | paused | — |
-| **9** | **Asset wiki + reuse-feedback loop (`AtomScoreService` + Resolver signal)** | **in progress · W1 Day 1** | targeting V2.7.0 |
+| **9** | **Asset wiki + reuse-feedback loop (`AtomScoreService` + WikiSync + Resolver signal)** | **W1 GA** | **V2.7.0** |
 
 See [`Agent 工厂/进度看板/`](https://github.com/Cliff-AI-Lab/Agent-ops/tree/feat/v2.0.0-factory) for the full Obsidian-style workboard (decision log, per-phase plans, daily notes).
 
@@ -157,12 +174,14 @@ The resolver consumes this score as an additive signal next to LLM confidence �
 
 ## Recent commits on `feat/v2.0.0-factory`
 
-- `Phase 9 W1 Day 1` — `AtomScoreService` + CLI `atom-score / atom-rank` (this commit)
-- `Phase 8 Day 3` — `harness factory deploy` + `DifyPublisher` + drift-check
-- `Phase 8 Day 2` — atom-level Jinja2 Dify projections (5 atoms)
-- `Phase 8 Day 1` — Dify v0.4.0 DSL alignment + import-check tool
-- `V2.4.0` — asset dependency graph
-- `V2.3.0` — Phase 6 W4 (tiktoken + soft-warn budget)
+- **V2.7.0 / Phase 9 W1 Day 3** — Resolver score signal (env-gated) + pipeline wire-up
+- Phase 9 W1 Day 2 — `WikiSync` to Obsidian + `factory wiki-sync` CLI
+- Phase 9 W1 Day 1 — `AtomScoreService` + CLI `atom-score / atom-rank`
+- Phase 8 Day 3 — `harness factory deploy` + `DifyPublisher` + drift-check
+- Phase 8 Day 2 — atom-level Jinja2 Dify projections (5 atoms)
+- Phase 8 Day 1 — Dify v0.4.0 DSL alignment + import-check tool
+- V2.4.0 — asset dependency graph
+- V2.3.0 — Phase 6 W4 (tiktoken + soft-warn budget)
 
 ---
 
