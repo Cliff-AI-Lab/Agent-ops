@@ -929,18 +929,73 @@ def main(argv: list[str] | None = None) -> int:
                 print("[pipeline] hold aborted")
                 return 130
 
-        # Day 3/4 will plug ReverseCompiler here. For Day 2 we stop after hold
-        # so the trace event is observable end-to-end already.
-        emit("L3", "Pipeline", "final_deployed",
-             f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=pending_reverse_compile")
-        print("[pipeline] HOLD released. Phase 10 Day 4 will add ReverseCompiler diff + 二次 deploy.")
+        # ----- Stage 6: reverse-compile (Day 3/4) -----
+        from app.delivery.reverse_compiler import ReverseCompiler
+
+        try:
+            drift = publisher.drift_check(args.specimen_id)
+        except RuntimeError as exc:
+            print(f"[pipeline] drift-check failed (export blocked): {exc}", file=sys.stderr)
+            print("[pipeline] continuing anyway; specimen marked human_tuned=unknown")
+            drift = None
+
+        if drift is None or drift.reason == "export_failed":
+            # Dify plugin_daemon flake or app deleted - log and stop
+            emit("L3", "Pipeline", "final_deployed",
+                 f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=unknown")
+            print("[pipeline] reverse-compile skipped; final state = unknown")
+            if args.json:
+                print(json.dumps({
+                    "path": "B",
+                    "wiki_hits": [asdict(h) for h in hits],
+                    "deploy": asdict(res),
+                    "view_url": view_url,
+                    "reverse_compile": "skipped",
+                }, ensure_ascii=False, indent=2, default=str))
+            return 0
+
+        # Pull the user-edited yaml via the same path drift_check used; we
+        # need the raw text, so re-fetch through the publisher.
+        # (Phase 10 W2 will refactor publisher to return both sha + body.)
+        export_code, export_body = publisher._get_json(  # noqa: SLF001 - module-internal use
+            f"{publisher.base_url}/console/api/apps/{res.dify_app_id}/export",
+            headers=publisher._csrf_headers(),  # noqa: SLF001
+        )
+        edited_yaml = export_body.get("data") if isinstance(export_body, dict) else None
+        if not edited_yaml:
+            print("[pipeline] could not fetch edited yaml; reverse-compile skipped")
+            return 0
+
+        original_dag = build_result.get("dag")
+        diff = ReverseCompiler().diff(args.specimen_id, original_dag, edited_yaml)
+        emit("L3", "Pipeline", "reverse_compiled",
+             f"specimen={args.specimen_id} human_tuned={diff.human_tuned} "
+             f"added={len(diff.added)} removed={len(diff.removed)} reordered={diff.reordered}")
+        print(f"[pipeline] reverse-compile: {diff.short_summary()}")
+
+        if not diff.human_tuned:
+            emit("L3", "Pipeline", "final_deployed",
+                 f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=false")
+            print("[pipeline] DONE (path B · no human edit detected)")
+        else:
+            print("[pipeline] human edits detected; Phase 10 W2 will auto-rebuild + 二次 deploy")
+            print("[pipeline] for W1 GA: marking specimen as human-tuned without re-deploy")
+            emit("L3", "Pipeline", "final_deployed",
+                 f"specimen={args.specimen_id} app_id={res.dify_app_id} human_tuned=true")
+
         if args.json:
             print(json.dumps({
                 "path": "B",
                 "wiki_hits": [asdict(h) for h in hits],
                 "deploy": asdict(res),
                 "view_url": view_url,
-                "reverse_compile": "deferred to Phase 10 Day 4",
+                "diff": {
+                    "human_tuned": diff.human_tuned,
+                    "added": diff.added,
+                    "removed": diff.removed,
+                    "reordered": diff.reordered,
+                    "summary": diff.short_summary(),
+                },
             }, ensure_ascii=False, indent=2, default=str))
         return 0
 
