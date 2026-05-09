@@ -482,6 +482,21 @@ def main(argv: list[str] | None = None) -> int:
     g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
     p_verify.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_adeps = sub.add_parser(
+        "agent-deps",
+        help="V2.8.1 Phase 10 W2 多智能体级联影响分析:改一个 specialist 看影响哪些其他",
+    )
+    p_adeps.add_argument("--nl", required=True,
+                         help="自然语言需求 (会调 build-auto 取多智能体 spec)")
+    p_adeps.add_argument("--changed", required=True,
+                         help="要改动的 agent id (specialist id 或 'triage')")
+    p_adeps.add_argument("--budget-cny", type=float, default=None,
+                         help="cost budget (透传给 build-auto)")
+    p_adeps.add_argument("--tenant", default="default")
+    p_adeps.add_argument("--no-tiktoken", action="store_true")
+    p_adeps.add_argument("--no-soft-warn", action="store_true")
+    p_adeps.add_argument("--json", action="store_true")
+
     p_pipe = sub.add_parser(
         "pipeline",
         help="V2.8 Phase 10 双路径闭环:NL → wiki → (build → deploy) ± canvas",
@@ -843,6 +858,68 @@ def main(argv: list[str] | None = None) -> int:
                     mark = "ok" if c.passed else "FAIL"
                     print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
         return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
+
+    if args.cmd == "agent-deps":
+        from dataclasses import asdict
+        from app.core.trace.bus import emit
+        from app.delivery.agent_dependency_analyzer import AgentDependencyAnalyzer
+
+        try:
+            res = asyncio.run(_run_build_auto(
+                args.nl,
+                None,
+                args.budget_cny,
+                tenant_id=args.tenant,
+                use_tiktoken=not args.no_tiktoken,
+                soft_warn=not args.no_soft_warn,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] build-auto failed: {exc}", file=sys.stderr)
+            return 4
+
+        if res.get("path") != "multi":
+            print(f"[factory] NL routed to single-agent path; "
+                  f"agent-deps requires a multi-agent spec.", file=sys.stderr)
+            print("  IndustryRouter classification:", res.get("classification"))
+            return 1
+
+        spec = res["spec"]
+        analyzer = AgentDependencyAnalyzer()
+        report = analyzer.analyze_change(spec, args.changed)
+
+        emit(
+            "L3", "MultiAgent", "multi_agent_dependency_impact",
+            f"changed={report.changed_agent} affected={report.affected_count} "
+            f"kinds={','.join(report.impact_kinds)}",
+        )
+
+        if args.json:
+            print(json.dumps({
+                "changed_agent": report.changed_agent,
+                "direct_upstream": report.direct_upstream,
+                "direct_downstream": report.direct_downstream,
+                "tool_overlap": [asdict(t) for t in report.tool_overlap],
+                "transitive_reach": report.transitive_reach,
+                "impact_kinds": report.impact_kinds,
+                "affected_count": report.affected_count,
+                "summary": report.short_summary(),
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"changed_agent:    {report.changed_agent}")
+            print(f"affected_count:   {report.affected_count}")
+            print(f"impact_kinds:     {', '.join(report.impact_kinds)}")
+            if report.direct_upstream:
+                print(f"  direct upstream:    {', '.join(report.direct_upstream)}")
+            if report.direct_downstream:
+                print(f"  direct downstream:  {', '.join(report.direct_downstream)}")
+            if report.tool_overlap:
+                print("  shared tool overlap:")
+                for o in report.tool_overlap:
+                    print(f"    {o.other_agent_id}: {', '.join(o.shared_tools)}")
+            if report.transitive_reach:
+                print(f"  transitive reach:   {', '.join(report.transitive_reach)}")
+            print(f"summary: {report.short_summary()}")
+        return 0
 
     if args.cmd == "pipeline":
         from dataclasses import asdict
