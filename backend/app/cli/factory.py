@@ -34,6 +34,92 @@ except Exception:  # noqa: BLE001
     pass
 
 
+def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
+    """Phase 10 W2 D2 - multi-agent path tail of `harness factory pipeline`.
+
+    multi_res shape (from _run_build_auto when path == 'multi'):
+      path: "multi"
+      classification: IndustryClassification
+      system_slug: str
+      source_code: str           # OpenAI Agents SDK runtime code
+      spec: MultiAgentSpec
+      deployed_files: dict[str, str]   # if --deploy-dir was set
+
+    Tail:
+      1. emit final_deployed (no Dify app_id; multi-agent ships as Python code)
+      2. run AgentDependencyAnalyzer on the spec for the triage agent (entry
+         point's blast radius is the most informative auto-summary)
+      3. print specialists table + impact summary
+    """
+    from dataclasses import asdict
+    from app.core.trace.bus import emit
+    from app.delivery.agent_dependency_analyzer import AgentDependencyAnalyzer
+
+    spec = multi_res.get("spec")
+    sys_slug = multi_res.get("system_slug", "")
+    deployed = multi_res.get("deployed_files") or {}
+    code_chars = len(multi_res.get("source_code") or "")
+
+    print(f"[pipeline] route: multi-agent system_slug={sys_slug}")
+    print(f"  specialists: {len(spec.specialists)}")
+    for s in spec.specialists:
+        handoffs = ", ".join(s.handoff_targets) or "-"
+        tools = ", ".join(s.tools[:3]) + (" ..." if len(s.tools) > 3 else "")
+        print(f"    [{s.id:24s}] class={s.agent_class:20s} handoffs={handoffs} tools=[{tools or '-'}]")
+    print(f"  source_code: {code_chars} chars")
+    if deployed:
+        print(f"  deployed: {len(deployed)} files in {args.deploy_dir}")
+    elif args.deploy_dir:
+        print(f"  WARNING: --deploy-dir given but composer did not write")
+    else:
+        print("  (no --deploy-dir; spec only, no code on disk)")
+
+    # Auto-analyze blast radius from the triage entry point - most informative
+    # default for "what's the system topology?" - then surface for each
+    # specialist via JSON if the user asked for machine-readable output.
+    analyzer = AgentDependencyAnalyzer()
+    triage_report = analyzer.analyze_change(spec, "triage")
+    emit("L3", "MultiAgent", "multi_agent_dependency_impact",
+         f"specimen={args.specimen_id} changed=triage affected={triage_report.affected_count} "
+         f"kinds={','.join(triage_report.impact_kinds)}")
+    print(f"[pipeline] blast radius from triage: {triage_report.short_summary()}")
+
+    if args.canvas != "none":
+        print("[pipeline] NOTE: --canvas only meaningful in single-agent mode for W2;")
+        print("  multi-agent canvas projection lands in Phase 10 W3.")
+
+    emit("L3", "Pipeline", "final_deployed",
+         f"specimen={args.specimen_id} mode=multi system={sys_slug} "
+         f"specialists={len(spec.specialists)} human_tuned=false")
+    print("[pipeline] DONE (multi-agent · code emitted)")
+
+    if args.json:
+        per_specialist_impact = {}
+        for s in spec.specialists:
+            r = analyzer.analyze_change(spec, s.id)
+            per_specialist_impact[s.id] = {
+                "direct_upstream": r.direct_upstream,
+                "direct_downstream": r.direct_downstream,
+                "tool_overlap": [asdict(t) for t in r.tool_overlap],
+                "transitive_reach": r.transitive_reach,
+                "impact_kinds": r.impact_kinds,
+                "summary": r.short_summary(),
+            }
+        print(json.dumps({
+            "mode": "multi",
+            "system_slug": sys_slug,
+            "specialists": [s.id for s in spec.specialists],
+            "deployed_dir": args.deploy_dir,
+            "deployed_files": list(deployed.keys()),
+            "blast_radius_from_triage": {
+                "affected": triage_report.affected_count,
+                "summary": triage_report.short_summary(),
+            },
+            "per_specialist_impact": per_specialist_impact,
+        }, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def _default_harness_db_path() -> Path:
     env = os.getenv("HARNESS_DB_PATH")
     if env:
@@ -504,10 +590,21 @@ def main(argv: list[str] | None = None) -> int:
     p_pipe.add_argument("--nl", required=True, help="自然语言需求")
     p_pipe.add_argument("--specimen-id", required=True, help="生产单 ID")
     p_pipe.add_argument(
+        "--mode",
+        default="auto",
+        choices=["auto", "single", "multi"],
+        help="智能体形态:auto=IndustryRouter 自动判定(默认),single=单智能体,multi=多智能体",
+    )
+    p_pipe.add_argument(
+        "--deploy-dir",
+        default=None,
+        help="多智能体路径写代码到目录(--mode multi/auto-routed-multi 必需;single 忽略)",
+    )
+    p_pipe.add_argument(
         "--canvas",
         default="none",
         choices=["none", "dify"],
-        help="路径选择:none=直发(默认),dify=经 Dify 画布人工确认 (Day 3+)",
+        help="路径选择:none=直发(默认),dify=经 Dify 画布人工确认 (single only)",
     )
     p_pipe.add_argument("--target", default="dify", choices=["dify"],
                         help="部署目标")
@@ -950,17 +1047,61 @@ def main(argv: list[str] | None = None) -> int:
                  f"specimen={args.specimen_id} nl_chars={len(args.nl)}")
             print("[pipeline] wiki MISS: no similar specimen, building from scratch")
 
-        # ----- Stage 2: route -----
-        emit("L3", "Pipeline", "route_taken",
-             f"specimen={args.specimen_id} path={'B' if args.canvas != 'none' else 'A'} canvas={args.canvas}")
-        print(f"[pipeline] route: path {'B (canvas=' + args.canvas + ')' if args.canvas != 'none' else 'A (direct)'}")
-
-        # ----- Stage 3: build -----
-        try:
-            build_result = asyncio.run(_run_build(args.nl))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[pipeline] build failed: {exc}", file=sys.stderr)
-            return 4
+        # ----- Stage 2: mode resolution + route -----
+        # auto = let IndustryRouter pick single vs multi (via build-auto path).
+        # single / multi = caller forces it.
+        if args.mode == "auto":
+            try:
+                auto_res = asyncio.run(_run_build_auto(
+                    args.nl,
+                    Path(args.deploy_dir) if args.deploy_dir else None,
+                    None,
+                    tenant_id="default",
+                    use_tiktoken=True,
+                    soft_warn=True,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[pipeline] auto build failed: {exc}", file=sys.stderr)
+                return 4
+            resolved_mode = auto_res.get("path", "single")  # "single" | "multi"
+            emit("L3", "Pipeline", "route_taken",
+                 f"specimen={args.specimen_id} mode=auto resolved={resolved_mode} canvas={args.canvas}")
+            if resolved_mode == "multi":
+                return _pipeline_multi_tail(args, auto_res)
+            # auto routed to single: shape the result so downstream code is uniform
+            build_result = {
+                "intent": auto_res.get("intent"),
+                "dag": auto_res.get("dag"),
+                "outputs": auto_res.get("outputs", {}),
+                "dsl": auto_res.get("dsl", ""),
+                "validation": auto_res.get("validation", {"ok": True, "issues": []}),
+            }
+        elif args.mode == "multi":
+            try:
+                multi_res = asyncio.run(_run_build_auto(
+                    args.nl,
+                    Path(args.deploy_dir) if args.deploy_dir else None,
+                    None,
+                    tenant_id="default",
+                    use_tiktoken=True,
+                    soft_warn=True,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[pipeline] multi build failed: {exc}", file=sys.stderr)
+                return 4
+            emit("L3", "Pipeline", "route_taken",
+                 f"specimen={args.specimen_id} mode=multi canvas={args.canvas}")
+            return _pipeline_multi_tail(args, multi_res)
+        else:
+            # single - the existing path
+            emit("L3", "Pipeline", "route_taken",
+                 f"specimen={args.specimen_id} mode=single path={'B' if args.canvas != 'none' else 'A'} canvas={args.canvas}")
+            print(f"[pipeline] route: single agent / path {'B (canvas=' + args.canvas + ')' if args.canvas != 'none' else 'A (direct)'}")
+            try:
+                build_result = asyncio.run(_run_build(args.nl))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[pipeline] build failed: {exc}", file=sys.stderr)
+                return 4
         outputs = build_result.get("outputs", {})
         yaml_text = outputs.get("dify") or build_result.get("dsl") or ""
         if not yaml_text:
