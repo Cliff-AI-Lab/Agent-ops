@@ -2,7 +2,7 @@
 
 **A deterministic, auditable factory pipeline that takes a sentence of natural language and produces a deployable Dify workflow — with a self-reinforcing reuse loop on its parts library.**
 
-> Status: **V2.8.0** (Phase 10 W1 GA · two-path lights-out pipeline) on branch `feat/v2.0.0-factory`
+> Status: **V2.8.1** (Phase 10 W2 partial · multi-agent path + dependency analyzer + spec differ) on branch `feat/v2.0.0-factory`
 > Tracker: [`Agent ops V2.0.0` Obsidian workboard](#) · GitHub: [Cliff-AI-Lab/Agent-ops](https://github.com/Cliff-AI-Lab/Agent-ops)
 
 ---
@@ -69,6 +69,8 @@ Open the Agent Ops workspace UI at `http://127.0.0.1:8000` (after `uv run uvicor
 | **`atom-verify [--atom ID \| --all]`** | **Phase 9 W2** | **Static health probe on each atom yaml (5 checks → pass_rate)** |
 | **`wiki-lookup --nl "..."`** | **Phase 10 W1 D1** | **Find similar prior specimens before building from scratch** |
 | **`pipeline --nl "..." --canvas none\|dify`** | **Phase 10 W1 GA** | **Two-path lights-out flow: NL→wiki→build→deploy (±canvas hold + reverse-compile)** |
+| **`pipeline --mode auto\|single\|multi`** | **Phase 10 W2 D2** | **Add agent-form routing: multi-agent path through build-auto with blast-radius summary** |
+| **`agent-deps --nl "..." --changed <id>`** | **Phase 10 W2 D1** | **Multi-agent blast-radius analysis (handoff chain / shared tools / transitive reach)** |
 
 Bold rows are the lights-out additions (Phase 8 / 9 / 10).
 
@@ -104,7 +106,7 @@ Cold-start atoms (zero history) are unaffected.
 | 8 | Dify lights-out publish (compiler V2 + atom Jinja2 + `factory deploy`) | done | **V2.6.0-day3** |
 | 8b | Three-pane Coding IDE view (factory canvas) | paused | — |
 | **9** | **Asset wiki + reuse-feedback loop (`AtomScoreService` + WikiSync + Resolver signal + HealthVerifier)** | W1 GA + W2 partial | V2.7.0 + W2 part |
-| **10** | **Two-path lights-out pipeline (NL → wiki → build → deploy ± canvas hold + reverse-compile)** | **W1 GA** | **V2.8.0** |
+| **10** | **Two-path lights-out pipeline + multi-agent dependency surface** | **W1 GA + W2 D1-D3** | **V2.8.0 + V2.8.1** |
 
 See [`Agent 工厂/进度看板/`](https://github.com/Cliff-AI-Lab/Agent-ops/tree/feat/v2.0.0-factory) for the full Obsidian-style workboard (decision log, per-phase plans, daily notes).
 
