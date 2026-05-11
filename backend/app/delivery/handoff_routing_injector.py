@@ -125,6 +125,7 @@ class HandoffRoutingInjector:
         edges_for_source: list[HandoffEdgeMetadata],
         *,
         condition_mode: ConditionMode = "contains",
+        fallback_agent: str | None = None,
     ) -> RoutingInjectionResult:
         in_chars = len(source_yaml)
         result = RoutingInjectionResult(
@@ -187,11 +188,21 @@ class HandoffRoutingInjector:
                 candidates=[e.to_agent for e in outgoing],
             )
 
+        # Validate fallback_agent if specified
+        outgoing_targets = {e.to_agent for e in outgoing}
+        if fallback_agent is not None and fallback_agent not in outgoing_targets:
+            result.skipped_reason = (
+                f"fallback_agent={fallback_agent!r} not in outgoing handoffs "
+                f"{sorted(outgoing_targets)}"
+            )
+            return result
+
         # Build if-else node
         ifelse_id = f"ifelse_{source_agent}_{uuid.uuid4().hex[:6]}"
         cases: list[dict[str, Any]] = []
         routes: list[InjectedRoute] = []
         operator = "is" if condition_mode == "is" else "contains"
+        fallback_webhook_id: str | None = None
         for i, edge in enumerate(outgoing):
             case_id = f"case_{edge.to_agent}_{uuid.uuid4().hex[:4]}"
             cases.append({
@@ -301,6 +312,8 @@ class HandoffRoutingInjector:
                 webhook_node_id=wh_id,
                 url=url,
             ))
+            if fallback_agent and edge.to_agent == fallback_agent:
+                fallback_webhook_id = wh_id
 
         # Build the if-else node itself; record the mode + operator so
         # system-diff / inspectors can see what wiring was used.
@@ -329,6 +342,8 @@ class HandoffRoutingInjector:
                     "case_count": len(cases),
                     "condition_mode": condition_mode,
                     "operator": operator,
+                    "fallback_agent": fallback_agent,
+                    "fallback_webhook_id": fallback_webhook_id,
                 },
             },
         })
@@ -345,15 +360,17 @@ class HandoffRoutingInjector:
             },
         })
 
-        # if-else else (default) -> End
+        # if-else else (default) -> fallback webhook if configured else End
+        else_target = fallback_webhook_id or SYNTHETIC_END_ID
+        else_target_type = "http-request" if fallback_webhook_id else "end"
         edges.append({
-            "id": f"{ifelse_id}-else-end",
+            "id": f"{ifelse_id}-else-{else_target}",
             "source": ifelse_id, "sourceHandle": "false",
-            "target": SYNTHETIC_END_ID, "targetHandle": "target",
+            "target": else_target, "targetHandle": "target",
             "type": "custom", "zIndex": 0,
             "data": {
                 "isInIteration": False, "isInLoop": False,
-                "sourceType": "if-else", "targetType": "end",
+                "sourceType": "if-else", "targetType": else_target_type,
             },
         })
 

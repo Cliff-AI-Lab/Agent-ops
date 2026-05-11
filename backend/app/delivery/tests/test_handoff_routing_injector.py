@@ -337,6 +337,100 @@ def test_contains_mode_does_not_touch_prompt():
     assert "_factory_routing_prompt" not in llm["data"]
 
 
+def test_fallback_agent_else_routes_to_fallback_webhook():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    edges = [
+        _edge("triage", "booking"),
+        _edge("triage", "seat"),
+        _edge("triage", "faq"),
+    ]
+    result = inj.inject_routing(
+        "triage", src, edges, fallback_agent="faq",
+    )
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse_id = next(
+        n["id"] for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    fallback_wh_id = next(
+        r.webhook_node_id for r in result.routes if r.target_agent == "faq"
+    )
+    else_edges = [
+        e for e in parsed["workflow"]["graph"]["edges"]
+        if e["source"] == ifelse_id and e.get("sourceHandle") == "false"
+    ]
+    assert len(else_edges) == 1
+    assert else_edges[0]["target"] == fallback_wh_id
+    assert else_edges[0]["data"]["targetType"] == "http-request"
+
+
+def test_no_fallback_keeps_else_to_end():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    result = inj.inject_routing("triage", src, [_edge("triage", "booking")])
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse_id = next(
+        n["id"] for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    else_edge = next(
+        e for e in parsed["workflow"]["graph"]["edges"]
+        if e["source"] == ifelse_id and e.get("sourceHandle") == "false"
+    )
+    assert else_edge["target"] == "node_end"
+
+
+def test_fallback_agent_not_in_outgoing_skipped():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    result = inj.inject_routing(
+        "triage", src, [_edge("triage", "booking")],
+        fallback_agent="ghost",
+    )
+    assert result.did_inject is False
+    assert "fallback_agent" in result.skipped_reason
+    assert "ghost" in result.skipped_reason
+
+
+def test_fallback_metadata_in_factory_routing():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    edges = [_edge("triage", "booking"), _edge("triage", "faq")]
+    result = inj.inject_routing("triage", src, edges, fallback_agent="faq")
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse = next(
+        n for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    meta = ifelse["data"]["_factory_routing"]
+    assert meta["fallback_agent"] == "faq"
+    assert meta["fallback_webhook_id"] is not None
+
+
+def test_fallback_with_strict_mode():
+    """Strict + fallback work together."""
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    edges = [_edge("triage", "booking"), _edge("triage", "faq")]
+    result = inj.inject_routing(
+        "triage", src, edges,
+        condition_mode="is", fallback_agent="faq",
+    )
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse = next(
+        n for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    meta = ifelse["data"]["_factory_routing"]
+    assert meta["operator"] == "is"
+    assert meta["fallback_agent"] == "faq"
+    # LLM still gets the prompt constraint
+    llm = next(n for n in parsed["workflow"]["graph"]["nodes"] if n["id"] == "llm1")
+    prompts = llm["data"]["prompt_template"]
+    assert any("FACTORY ROUTING CONSTRAINT" in p["text"] for p in prompts)
+
+
 def test_strict_mode_handles_llm_node_without_prompt_template():
     """If LLM node lacks prompt_template, helper must add one cleanly."""
     raw = {
