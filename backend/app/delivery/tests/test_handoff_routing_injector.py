@@ -255,3 +255,114 @@ def test_edges_from_other_agents_filtered():
     result = inj.inject_routing("triage", src, edges)
     assert len(result.routes) == 1
     assert result.routes[0].target_agent == "booking"
+
+
+# ----- W5 D2: strict condition_mode -----
+
+
+def test_strict_mode_uses_is_operator():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    result = inj.inject_routing(
+        "triage", src, [_edge("triage", "booking")],
+        condition_mode="is",
+    )
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse = next(
+        n for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    cond = ifelse["data"]["cases"][0]["conditions"][0]
+    assert cond["comparison_operator"] == "is"
+    assert ifelse["data"]["_factory_routing"]["condition_mode"] == "is"
+    assert ifelse["data"]["_factory_routing"]["operator"] == "is"
+
+
+def test_default_mode_keeps_contains_operator():
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    result = inj.inject_routing("triage", src, [_edge("triage", "booking")])
+    parsed = yaml.safe_load(result.yaml_out)
+    ifelse = next(
+        n for n in parsed["workflow"]["graph"]["nodes"]
+        if n.get("data", {}).get("type") == "if-else"
+    )
+    cond = ifelse["data"]["cases"][0]["conditions"][0]
+    assert cond["comparison_operator"] == "contains"
+    assert ifelse["data"]["_factory_routing"]["condition_mode"] == "contains"
+
+
+def test_strict_mode_appends_prompt_constraint_to_llm():
+    """Strict mode must append an explicit allowlist instruction to the LLM."""
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    targets = ["booking", "seat", "refund"]
+    edges = [_edge("triage", t) for t in targets]
+    result = inj.inject_routing(
+        "triage", src, edges, condition_mode="is",
+    )
+    parsed = yaml.safe_load(result.yaml_out)
+    llm = next(
+        n for n in parsed["workflow"]["graph"]["nodes"] if n["id"] == "llm1"
+    )
+    # constraint added to prompt_template
+    prompts = llm["data"].get("prompt_template", [])
+    constraint = next(
+        (p for p in prompts if "FACTORY ROUTING CONSTRAINT" in p.get("text", "")),
+        None,
+    )
+    assert constraint is not None
+    for t in targets:
+        assert t in constraint["text"]
+    # __none__ fallback for else branch
+    assert "__none__" in constraint["text"]
+    # node-level marker
+    marker = llm["data"]["_factory_routing_prompt"]
+    assert marker["appended"] is True
+    assert marker["candidates"] == targets
+
+
+def test_contains_mode_does_not_touch_prompt():
+    """Default contains mode is non-invasive on the LLM prompt."""
+    inj = HandoffRoutingInjector()
+    src = _yaml_with_llm()
+    result = inj.inject_routing("triage", src, [_edge("triage", "booking")])
+    parsed = yaml.safe_load(result.yaml_out)
+    llm = next(
+        n for n in parsed["workflow"]["graph"]["nodes"] if n["id"] == "llm1"
+    )
+    prompts = llm["data"].get("prompt_template", [])
+    assert not any("FACTORY ROUTING CONSTRAINT" in p.get("text", "")
+                   for p in prompts)
+    assert "_factory_routing_prompt" not in llm["data"]
+
+
+def test_strict_mode_handles_llm_node_without_prompt_template():
+    """If LLM node lacks prompt_template, helper must add one cleanly."""
+    raw = {
+        "version": "0.4.0", "kind": "app",
+        "app": {"name": "x", "mode": "workflow"},
+        "workflow": {"graph": {
+            "nodes": [
+                {"id": "node_start", "type": "custom",
+                 "data": {"type": "start"}},
+                {"id": "llm1", "type": "custom",
+                 "data": {"type": "llm"}},  # no prompt_template
+                {"id": "node_end", "type": "custom",
+                 "data": {"type": "end"}},
+            ],
+            "edges": [{"source": "llm1", "target": "node_end",
+                       "id": "l-e", "type": "custom"}],
+        }},
+    }
+    src = yaml.safe_dump(raw, allow_unicode=True, sort_keys=False)
+    inj = HandoffRoutingInjector()
+    result = inj.inject_routing(
+        "triage", src, [_edge("triage", "booking")],
+        condition_mode="is",
+    )
+    assert result.did_inject is True
+    parsed = yaml.safe_load(result.yaml_out)
+    llm = next(n for n in parsed["workflow"]["graph"]["nodes"] if n["id"] == "llm1")
+    prompts = llm["data"]["prompt_template"]
+    assert any("FACTORY ROUTING CONSTRAINT" in p["text"] for p in prompts)

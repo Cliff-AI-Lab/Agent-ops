@@ -43,11 +43,18 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
 from app.delivery.multi_agent_dify_projector import HandoffEdgeMetadata
+
+
+ConditionMode = Literal["contains", "is"]
+"""contains: loose (default; LLM may chat around the answer)
+is:       strict (LLM must output ONLY the specialist id; we also append
+           a prompt constraint so the LLM knows the contract)
+"""
 
 
 logger = logging.getLogger(__name__)
@@ -116,6 +123,8 @@ class HandoffRoutingInjector:
         source_agent: str,
         source_yaml: str,
         edges_for_source: list[HandoffEdgeMetadata],
+        *,
+        condition_mode: ConditionMode = "contains",
     ) -> RoutingInjectionResult:
         in_chars = len(source_yaml)
         result = RoutingInjectionResult(
@@ -168,10 +177,21 @@ class HandoffRoutingInjector:
         edges = [e for e in edges
                  if not (isinstance(e, dict) and e.get("source") == llm_id)]
 
+        # In strict mode, append a prompt constraint to the LLM node telling it
+        # to output ONLY one of the candidate specialist ids. This sets up the
+        # equals comparison below to work.
+        if condition_mode == "is":
+            self._tighten_llm_prompt(
+                nodes=nodes,
+                llm_id=llm_id,
+                candidates=[e.to_agent for e in outgoing],
+            )
+
         # Build if-else node
         ifelse_id = f"ifelse_{source_agent}_{uuid.uuid4().hex[:6]}"
         cases: list[dict[str, Any]] = []
         routes: list[InjectedRoute] = []
+        operator = "is" if condition_mode == "is" else "contains"
         for i, edge in enumerate(outgoing):
             case_id = f"case_{edge.to_agent}_{uuid.uuid4().hex[:4]}"
             cases.append({
@@ -182,7 +202,7 @@ class HandoffRoutingInjector:
                         "id": uuid.uuid4().hex,
                         "varType": "string",
                         "variable_selector": [llm_id, "text"],
-                        "comparison_operator": "contains",
+                        "comparison_operator": operator,
                         "value": edge.to_agent,
                     },
                 ],
@@ -282,7 +302,8 @@ class HandoffRoutingInjector:
                 url=url,
             ))
 
-        # Build the if-else node itself
+        # Build the if-else node itself; record the mode + operator so
+        # system-diff / inspectors can see what wiring was used.
         nodes.append({
             "id": ifelse_id,
             "type": "custom",
@@ -306,6 +327,8 @@ class HandoffRoutingInjector:
                     "source_agent": source_agent,
                     "llm_node_id": llm_id,
                     "case_count": len(cases),
+                    "condition_mode": condition_mode,
+                    "operator": operator,
                 },
             },
         })
@@ -346,6 +369,52 @@ class HandoffRoutingInjector:
         return result
 
     # ----- internals ----------------------------------------------------
+
+    @staticmethod
+    def _tighten_llm_prompt(
+        nodes: list, llm_id: str, candidates: list[str],
+    ) -> None:
+        """Append a strict routing constraint to the LLM node's prompt_template.
+
+        The constraint tells the LLM the EXACT closed set of specialist ids it
+        is allowed to output, with no surrounding text. The matching if-else
+        case will then use `is` (equals) instead of `contains`, eliminating
+        ambiguity (e.g. an LLM saying "I think booking is fine" would have
+        matched `booking` AND `book` cases under `contains`).
+        """
+        if not candidates:
+            return
+        target_node = next(
+            (n for n in nodes if isinstance(n, dict) and n.get("id") == llm_id),
+            None,
+        )
+        if target_node is None:
+            return
+        data = target_node.setdefault("data", {})
+        prompt_template = data.setdefault("prompt_template", [])
+        if not isinstance(prompt_template, list):
+            return
+        constraint_text = (
+            "FACTORY ROUTING CONSTRAINT (auto-injected by HandoffRoutingInjector):\n"
+            "Your entire response MUST be exactly one of the following "
+            f"specialist ids, with no prefix, suffix, quotes, or extra "
+            f"whitespace: {', '.join(candidates)}\n"
+            "If the user's request fits none of these, output the literal "
+            "string `__none__` (the workflow will fall through to the else "
+            "branch)."
+        )
+        # Add as a final system message; safe to append regardless of role mix
+        prompt_template.append({
+            "id": uuid.uuid4().hex,
+            "role": "system",
+            "text": constraint_text,
+        })
+        # mark on the node so verifier / system-diff can see it
+        data.setdefault("_factory_routing_prompt", {})
+        data["_factory_routing_prompt"] = {
+            "appended": True,
+            "candidates": list(candidates),
+        }
 
     @staticmethod
     def _find_last_llm(nodes: list) -> str | None:
