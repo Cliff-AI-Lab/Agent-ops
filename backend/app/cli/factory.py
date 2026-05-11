@@ -99,6 +99,9 @@ def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
                 system_slug=sys_slug,
                 inject_handoffs=args.inject_handoffs,
                 dify_base_url=args.dify_base,
+                routing_mode=args.routing_mode,
+                routing_condition_mode="is" if args.routing_strict else "contains",
+                routing_fallback_agent=args.routing_fallback,
             ))
         except Exception as exc:  # noqa: BLE001
             print(f"[pipeline] canvas projection failed: {exc}", file=sys.stderr)
@@ -704,6 +707,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="canvas hold 时自动续(CI 模式)")
     p_pipe.add_argument("--inject-handoffs", action="store_true",
                         help="多智能体 --canvas dify 时 W3 D4 注入 handoff webhook 节点并 republish")
+    p_pipe.add_argument("--routing-mode", default="chain",
+                        choices=["chain", "switch"],
+                        help="handoff 注入拓扑:chain=顺序 fan-out(W3 D3),switch=if-else 分支(W5 D1)")
+    p_pipe.add_argument("--routing-strict", action="store_true",
+                        help="switch 模式下用 condition_mode='is' + 强制 LLM prompt 约束(W5 D2)")
+    p_pipe.add_argument("--routing-fallback", default=None,
+                        help="switch 模式下 else 分支 fallback 到该 specialist webhook(W5 D3)")
     p_pipe.add_argument("--name", default=None, help="Dify app name override")
     p_pipe.add_argument("--json", action="store_true", help="机器可读输出")
 

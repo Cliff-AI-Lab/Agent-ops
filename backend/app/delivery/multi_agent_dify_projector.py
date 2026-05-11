@@ -198,6 +198,9 @@ class MultiAgentDifyProjector:
         project_triage: bool = True,
         inject_handoffs: bool = False,
         dify_base_url: str | None = None,
+        routing_mode: str = "chain",
+        routing_condition_mode: str = "contains",
+        routing_fallback_agent: str | None = None,
     ) -> ProjectionResult:
         slug = system_slug or self._slugify(spec.name)
         existing = self._read_mapping(slug)
@@ -255,7 +258,7 @@ class MultiAgentDifyProjector:
             spec, triage_app_id, new_mapping,
         )
 
-        # ----- handoff webhook injection (W3 D4) -----
+        # ----- handoff webhook injection (W3 D4 + W5 D4) -----
         if inject_handoffs and result.handoff_edges:
             result.injected_agents = await self._inject_and_republish(
                 slug=slug,
@@ -264,6 +267,9 @@ class MultiAgentDifyProjector:
                 specialist_app_ids=new_mapping,
                 handoff_edges=result.handoff_edges,
                 dify_base_url=dify_base_url,
+                routing_mode=routing_mode,
+                routing_condition_mode=routing_condition_mode,
+                routing_fallback_agent=routing_fallback_agent,
             )
 
         mapping = _MappingFile(
@@ -285,17 +291,22 @@ class MultiAgentDifyProjector:
         specialist_app_ids: dict[str, str],
         handoff_edges: list[HandoffEdgeMetadata],
         dify_base_url: str | None,
+        routing_mode: str = "chain",
+        routing_condition_mode: str = "contains",
+        routing_fallback_agent: str | None = None,
     ) -> list[InjectedAgent]:
         """For each source agent with outgoing edges, rebuild + inject + republish.
 
         Splits the handoff_edges list by from_agent. For each source agent
         we re-run FactoryPipeline on the agent's nl_brief (or triage NL),
-        inject the webhook chain, and DifyPublisher.publish under the same
-        specimen_id (so the existing dify_app_id is reused, not duplicated).
+        inject the webhook chain OR a routing if-else, and DifyPublisher.publish
+        under the same specimen_id (so the existing dify_app_id is reused).
         """
+        from app.delivery.handoff_routing_injector import HandoffRoutingInjector
         from app.delivery.handoff_webhook_injector import HandoffWebhookInjector
 
-        injector = HandoffWebhookInjector(dify_base_url=dify_base_url)
+        chain_injector = HandoffWebhookInjector(dify_base_url=dify_base_url)
+        routing_injector = HandoffRoutingInjector(dify_base_url=dify_base_url)
 
         # group edges by source agent
         by_source: dict[str, list[HandoffEdgeMetadata]] = {}
@@ -347,29 +358,47 @@ class MultiAgentDifyProjector:
                 ))
                 continue
 
-            inj_res = injector.inject(source_agent, yaml_text, edges)
-            if not inj_res.did_inject:
-                out.append(InjectedAgent(
-                    source_agent=source_agent,
-                    republish_error=f"injector skipped: {inj_res.skipped_reason}",
-                ))
-                continue
+            # Switch between chain (W3 D3) and routing (W5 D1-D3) injectors
+            if routing_mode == "switch":
+                rinj = routing_injector.inject_routing(
+                    source_agent, yaml_text, edges,
+                    condition_mode=routing_condition_mode,
+                    fallback_agent=routing_fallback_agent,
+                )
+                if not rinj.did_inject:
+                    out.append(InjectedAgent(
+                        source_agent=source_agent,
+                        republish_error=f"routing injector skipped: {rinj.skipped_reason}",
+                    ))
+                    continue
+                injected_targets = [r.target_agent for r in rinj.routes]
+                yaml_to_publish = rinj.yaml_out
+            else:
+                inj_res = chain_injector.inject(source_agent, yaml_text, edges)
+                if not inj_res.did_inject:
+                    out.append(InjectedAgent(
+                        source_agent=source_agent,
+                        republish_error=f"chain injector skipped: {inj_res.skipped_reason}",
+                    ))
+                    continue
+                injected_targets = [w.target_agent for w in inj_res.injected]
+                yaml_to_publish = inj_res.yaml_out
 
             try:
                 pub_res = self.publisher.publish(
-                    source_specimen, inj_res.yaml_out, app_name=source_name,
+                    source_specimen, yaml_to_publish, app_name=source_name,
                 )
             except RuntimeError as exc:  # noqa: BLE001
                 out.append(InjectedAgent(
                     source_agent=source_agent,
-                    injected_targets=[w.target_agent for w in inj_res.injected],
+                    injected_targets=injected_targets,
                     republish_error=f"republish failed: {exc}",
                 ))
                 continue
 
             out.append(InjectedAgent(
                 source_agent=source_agent,
-                injected_targets=[w.target_agent for w in inj_res.injected],
+                injected_targets=injected_targets,
                 republish_status=pub_res.status,
                 republish_error=pub_res.error,
             ))

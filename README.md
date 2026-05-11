@@ -2,7 +2,7 @@
 
 **A deterministic, auditable factory pipeline that takes a sentence of natural language and produces a deployable Dify workflow — with a self-reinforcing reuse loop on its parts library.**
 
-> Status: **V2.9.2** (Phase 10 W4 D3 · multi-agent system-level reverse compile) on branch `feat/v2.0.0-factory`
+> Status: **V2.9.3** (Phase 10 W5 GA · branch-based handoff routing + fallback) on branch `feat/v2.0.0-factory`
 > Tracker: [`Agent ops V2.0.0` Obsidian workboard](#) · GitHub: [Cliff-AI-Lab/Agent-ops](https://github.com/Cliff-AI-Lab/Agent-ops)
 
 ---
@@ -74,6 +74,7 @@ Open the Agent Ops workspace UI at `http://127.0.0.1:8000` (after `uv run uvicor
 | **`pipeline --mode multi --canvas dify [--inject-handoffs]`** | **Phase 10 W3 GA** | **Project each specialist + triage to its own Dify app, optionally inject handoff webhook nodes** |
 | **`deploy-keys --system-slug <slug>`** | **Phase 10 W4 D1** | **Provision Dify Service API keys for the projected multi-agent system; writes .env.dify-apps** |
 | **`system-diff --system-slug <slug> --nl "..."`** | **Phase 10 W4 D3** | **Multi-agent reverse compile: detect human edits across every specialist's Dify export** |
+| **`pipeline ... --routing-mode switch [--routing-strict] [--routing-fallback X]`** | **Phase 10 W5 GA** | **if-else routing on triage: each handoff target becomes a case, optional strict equals + fallback specialist** |
 
 Bold rows are the lights-out additions (Phase 8 / 9 / 10).
 
