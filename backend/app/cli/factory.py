@@ -102,13 +102,28 @@ def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
         if proj_result is not None:
             emit("L3", "MultiAgent", "canvas_projected",
                  f"specimen={args.specimen_id} system={sys_slug} "
-                 f"ok={proj_result.success_count} fail={proj_result.fail_count}")
+                 f"ok={proj_result.success_count} fail={proj_result.fail_count} "
+                 f"triage={'ok' if proj_result.triage_projected else 'miss'} "
+                 f"handoffs={len(proj_result.handoff_edges)}")
             print(f"[pipeline] canvas=dify projection: {proj_result.short_summary()}")
+            if proj_result.triage is not None:
+                tri_tag = "OK" if not proj_result.triage.error else "FAIL"
+                print(f"    [{tri_tag:4s}] {'triage':24s} → {proj_result.triage.dify_app_id or '-'}")
+                if proj_result.triage.error:
+                    print(f"           {proj_result.triage.error}")
             for sp in proj_result.specialists:
                 tag = "OK" if not sp.error else "FAIL"
                 print(f"    [{tag:4s}] {sp.specialist_id:24s} → {sp.dify_app_id or '-'}")
                 if sp.error:
                     print(f"           {sp.error}")
+            if proj_result.handoff_edges:
+                print(f"  handoff metadata ({len(proj_result.handoff_edges)} edges, W3 D3 will inject webhooks):")
+                for e in proj_result.handoff_edges[:10]:
+                    from_id = e.from_dify_app_id or "?"
+                    to_id = e.to_dify_app_id or "?"
+                    print(f"    {e.from_agent} → {e.to_agent}  ({from_id[:8]}..→{to_id[:8]}..)")
+                if len(proj_result.handoff_edges) > 10:
+                    print(f"    ... +{len(proj_result.handoff_edges) - 10} more")
             if proj_result.mapping_path:
                 print(f"  mapping: {proj_result.mapping_path}")
     elif args.canvas != "none":

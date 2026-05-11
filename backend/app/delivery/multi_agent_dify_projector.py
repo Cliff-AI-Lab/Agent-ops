@@ -66,14 +66,48 @@ class SpecialistProjection:
 
 
 @dataclass
+class TriageProjection:
+    """Triage outcome of a project() call (Phase 10 W3 D2)."""
+
+    specimen_id: str
+    dify_app_id: str
+    status: str
+    yaml_chars: int = 0
+    is_first_deploy: bool = False
+    deploy_count: int = 0
+    error: str = ""
+
+
+@dataclass
+class HandoffEdgeMetadata:
+    """One handoff edge from the spec mapped to its runtime targets.
+
+    Phase 10 W3 D2 ships metadata only; the actual webhook node injection
+    into Dify happens in W3 D3 so the user can review the topology first.
+    """
+
+    from_agent: str
+    to_agent: str
+    from_dify_app_id: str | None
+    to_dify_app_id: str | None
+    when: str = ""
+
+
+@dataclass
 class ProjectionResult:
     """Aggregate outcome of projecting one multi-agent spec."""
 
     system_slug: str
     projected_at: str
-    triage_projected: bool = False
+    triage: TriageProjection | None = None
     specialists: list[SpecialistProjection] = field(default_factory=list)
+    handoff_edges: list[HandoffEdgeMetadata] = field(default_factory=list)
     mapping_path: Path | None = None
+
+    @property
+    def triage_projected(self) -> bool:
+        """Backward-compat flag from W3 D1."""
+        return self.triage is not None and not self.triage.error
 
     @property
     def success_count(self) -> int:
@@ -84,11 +118,18 @@ class ProjectionResult:
         return sum(1 for s in self.specialists if s.error)
 
     def short_summary(self) -> str:
-        return (
-            f"projected system={self.system_slug} "
-            f"specialists={self.success_count}/{len(self.specialists)} ok"
-            + (f" ({self.fail_count} failed)" if self.fail_count else "")
-        )
+        parts = [
+            f"projected system={self.system_slug}",
+            f"specialists={self.success_count}/{len(self.specialists)} ok",
+        ]
+        if self.fail_count:
+            parts.append(f"({self.fail_count} failed)")
+        if self.triage is not None:
+            tri = "ok" if not self.triage.error else "FAIL"
+            parts.append(f"triage={tri}")
+        if self.handoff_edges:
+            parts.append(f"handoffs={len(self.handoff_edges)}")
+        return " ".join(parts)
 
 
 @dataclass
@@ -99,6 +140,7 @@ class _MappingFile:
     updated_at: str
     triage_dify_app_id: str | None
     specialists: dict[str, str]  # specialist_id -> dify_app_id
+    handoff_edges: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(
@@ -107,6 +149,7 @@ class _MappingFile:
                 "updated_at": self.updated_at,
                 "triage_dify_app_id": self.triage_dify_app_id,
                 "specialists": self.specialists,
+                "handoff_edges": self.handoff_edges,
             },
             ensure_ascii=False,
             indent=2,
@@ -140,10 +183,13 @@ class MultiAgentDifyProjector:
         self,
         spec: "MultiAgentSpec",
         system_slug: str | None = None,
+        *,
+        project_triage: bool = True,
     ) -> ProjectionResult:
         slug = system_slug or self._slugify(spec.name)
         existing = self._read_mapping(slug)
         prior_specialists = (existing.specialists if existing else {})
+        prior_triage_id = existing.triage_dify_app_id if existing else None
 
         result = ProjectionResult(
             system_slug=slug,
@@ -152,6 +198,7 @@ class MultiAgentDifyProjector:
 
         new_mapping: dict[str, str] = dict(prior_specialists)
 
+        # ----- specialists -----
         for sp in spec.specialists:
             specimen_id = f"{slug}.{sp.id}"
             outcome = await self._project_one(specimen_id, sp.nl_brief, sp.name)
@@ -170,16 +217,115 @@ class MultiAgentDifyProjector:
             if outcome.get("dify_app_id"):
                 new_mapping[sp.id] = outcome["dify_app_id"]
 
+        # ----- triage (W3 D2) -----
+        triage_app_id = prior_triage_id
+        if project_triage:
+            triage_specimen = f"{slug}.triage"
+            triage_nl = self._build_triage_nl(spec)
+            triage_outcome = await self._project_one(
+                triage_specimen, triage_nl, spec.triage.name,
+            )
+            result.triage = TriageProjection(
+                specimen_id=triage_specimen,
+                dify_app_id=triage_outcome.get("dify_app_id", ""),
+                status=triage_outcome.get("status", "unknown"),
+                yaml_chars=triage_outcome.get("yaml_chars", 0),
+                is_first_deploy=triage_outcome.get("is_first_deploy", False),
+                deploy_count=triage_outcome.get("deploy_count", 0),
+                error=triage_outcome.get("error", ""),
+            )
+            if triage_outcome.get("dify_app_id"):
+                triage_app_id = triage_outcome["dify_app_id"]
+
+        # ----- handoff edges metadata (W3 D2) -----
+        result.handoff_edges = self._build_handoff_metadata(
+            spec, triage_app_id, new_mapping,
+        )
+
         mapping = _MappingFile(
             system_slug=slug,
             updated_at=result.projected_at,
-            triage_dify_app_id=(
-                existing.triage_dify_app_id if existing else None
-            ),
+            triage_dify_app_id=triage_app_id,
             specialists=new_mapping,
+            handoff_edges=[asdict(e) for e in result.handoff_edges],
         )
         result.mapping_path = self._write_mapping(mapping)
         return result
+
+    def _build_triage_nl(self, spec: "MultiAgentSpec") -> str:
+        """Synthesize an NL brief for the triage agent.
+
+        Triage's job is to read user input, classify it, and route to the
+        right specialist. We turn that into a runnable single-agent brief
+        the FactoryPipeline can compile into a Dify workflow.
+        """
+        roster = ", ".join(
+            f"{s.id} ({s.agent_class}): {s.description.strip().splitlines()[0][:80]}"
+            for s in spec.specialists
+        )
+        return (
+            f"读取用户输入,作为路由分类器,输出应转交给以下哪个 specialist:\n"
+            f"{roster}\n"
+            f"prompt_id={spec.triage.system_prompt_id}; "
+            f"fallback_message={spec.triage.fallback_message!r}."
+        )
+
+    @staticmethod
+    def _build_handoff_metadata(
+        spec: "MultiAgentSpec",
+        triage_app_id: str | None,
+        specialist_app_ids: dict[str, str],
+    ) -> list[HandoffEdgeMetadata]:
+        """Map every handoff edge in spec to its runtime Dify endpoints.
+
+        Sources:
+          1. triage.initial_handoff_targets  (from triage -> specialist)
+          2. specialist.handoff_targets      (specialist -> specialist)
+          3. spec.handoffs                   (global edges, when="..." copied)
+        """
+        edges: list[HandoffEdgeMetadata] = []
+
+        for target in spec.triage.initial_handoff_targets:
+            edges.append(HandoffEdgeMetadata(
+                from_agent="triage",
+                to_agent=target,
+                from_dify_app_id=triage_app_id,
+                to_dify_app_id=specialist_app_ids.get(target),
+                when="initial routing from triage",
+            ))
+
+        for s in spec.specialists:
+            for target in s.handoff_targets:
+                edges.append(HandoffEdgeMetadata(
+                    from_agent=s.id,
+                    to_agent=target,
+                    from_dify_app_id=specialist_app_ids.get(s.id),
+                    to_dify_app_id=specialist_app_ids.get(target),
+                    when=f"{s.id} declared handoff target",
+                ))
+
+        for edge in spec.handoffs:
+            from_id = getattr(edge, "from_specialist", None) or ""
+            to_id = getattr(edge, "to_specialist", None) or ""
+            when = getattr(edge, "when", "")
+            edges.append(HandoffEdgeMetadata(
+                from_agent=from_id,
+                to_agent=to_id,
+                from_dify_app_id=specialist_app_ids.get(from_id),
+                to_dify_app_id=specialist_app_ids.get(to_id),
+                when=when,
+            ))
+
+        # dedup by (from_agent, to_agent), keeping the first 'when' description
+        seen: set[tuple[str, str]] = set()
+        out: list[HandoffEdgeMetadata] = []
+        for e in edges:
+            key = (e.from_agent, e.to_agent)
+            if key in seen or not e.from_agent or not e.to_agent:
+                continue
+            seen.add(key)
+            out.append(e)
+        return out
 
     # ----- internals -----------------------------------------------------
 

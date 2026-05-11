@@ -126,7 +126,7 @@ def test_projects_one_specialist(log_dir: Path):
     pub = _fake_publisher({"ad_hoc_test_system.booking": "app-abc"})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     assert result.success_count == 1
     assert result.fail_count == 0
@@ -141,7 +141,7 @@ def test_projects_all_specialists(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     assert result.success_count == 3
     assert {s.specialist_id for s in result.specialists} == {"booking", "seat", "refund"}
@@ -154,7 +154,7 @@ def test_mapping_written_to_log_dir(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     assert result.mapping_path is not None
     assert result.mapping_path.exists()
@@ -194,7 +194,7 @@ def test_build_failure_does_not_halt_others(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     by_id = {s.specialist_id: s for s in result.specialists}
     assert by_id["ok1"].error == ""
@@ -210,7 +210,7 @@ def test_publish_failure_recorded_as_error(log_dir: Path):
     pub = _fake_publisher({}, errors={"ad_hoc_test_system.booking": "dify import 400"})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     assert result.fail_count == 1
     assert "400" in result.specialists[0].error
@@ -223,7 +223,7 @@ def test_slugify_normalizes_spec_name(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     # slug strips spaces/slashes/center-dot; file lands cleanly
     assert result.mapping_path.exists()
@@ -237,7 +237,7 @@ def test_short_summary_format(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec))
+    result = asyncio.run(projector.project(spec, project_triage=False))
 
     summary = result.short_summary()
     assert "system=" in summary
@@ -251,7 +251,144 @@ def test_explicit_system_slug_overrides_spec_name(log_dir: Path):
     pub = _fake_publisher({})
 
     projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
-    result = asyncio.run(projector.project(spec, system_slug="custom-slug-123"))
+    result = asyncio.run(projector.project(spec, system_slug="custom-slug-123", project_triage=False))
 
     assert result.system_slug == "custom-slug-123"
     assert result.mapping_path.name == "custom-slug-123.multi-agent.json"
+
+
+# ----- Phase 10 W3 D2: triage projection + handoff metadata -----
+
+def test_triage_projected_by_default(log_dir: Path):
+    spec = _make_spec({"id": "booking"})
+    build = _fake_build_factory()
+    pub = _fake_publisher({"ad_hoc_test_system.triage": "app-triage"})
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec))
+
+    assert result.triage is not None
+    assert result.triage_projected is True
+    assert result.triage.dify_app_id == "app-triage"
+    # build was called once per specialist + once for triage
+    assert len(build.calls) == 2
+
+
+def test_triage_projection_skipped_when_disabled(log_dir: Path):
+    spec = _make_spec({"id": "x"})
+    build = _fake_build_factory()
+    pub = _fake_publisher({})
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec, project_triage=False))
+
+    assert result.triage is None
+    assert result.triage_projected is False
+
+
+def test_triage_nl_includes_specialist_roster(log_dir: Path):
+    spec = _make_spec(
+        {"id": "booking", "agent_class": "customer_service"},
+        {"id": "seat", "agent_class": "data_analytics"},
+    )
+    captured: list[str] = []
+
+    async def _build(nl):
+        captured.append(nl)
+        return {"outputs": {"dify": "version: '0.4.0'\nname: x\n"}, "dsl": ""}
+
+    pub = _fake_publisher({})
+    projector = MultiAgentDifyProjector(pub, _build, log_dir=log_dir)
+    asyncio.run(projector.project(spec))
+
+    triage_nl = captured[-1]  # triage projection comes after specialists
+    assert "booking" in triage_nl
+    assert "seat" in triage_nl
+    assert "customer_service" in triage_nl
+    assert "data_analytics" in triage_nl
+
+
+def test_handoff_edges_metadata_includes_triage_targets(log_dir: Path):
+    spec = _make_spec(
+        {"id": "booking", "handoff_targets": ["seat"]},
+        {"id": "seat"},
+    )
+    build = _fake_build_factory()
+    pub = _fake_publisher({
+        "ad_hoc_test_system.triage": "tid",
+        "ad_hoc_test_system.booking": "bid",
+        "ad_hoc_test_system.seat": "sid",
+    })
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec))
+
+    by_pair = {(e.from_agent, e.to_agent): e for e in result.handoff_edges}
+    # triage targets booking and seat (initial_handoff_targets = all specialists)
+    assert ("triage", "booking") in by_pair
+    assert ("triage", "seat") in by_pair
+    # specialist's own handoff_targets
+    assert ("booking", "seat") in by_pair
+
+    # endpoints resolved
+    assert by_pair[("triage", "booking")].from_dify_app_id == "tid"
+    assert by_pair[("triage", "booking")].to_dify_app_id == "bid"
+    assert by_pair[("booking", "seat")].from_dify_app_id == "bid"
+    assert by_pair[("booking", "seat")].to_dify_app_id == "sid"
+
+
+def test_handoff_edges_deduped(log_dir: Path):
+    """If a handoff appears in both specialist.handoff_targets and spec.handoffs,
+    metadata records it once."""
+    from app.core.pipelines.factory.ir.multi_agent import HandoffEdge
+
+    spec = _make_spec(
+        {"id": "a", "handoff_targets": ["b"]},
+        {"id": "b"},
+    )
+    spec.handoffs = [HandoffEdge(from_specialist="a", to_specialist="b",
+                                 when="when condition triggers")]
+
+    build = _fake_build_factory()
+    pub = _fake_publisher({})
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec))
+
+    a_to_b = [e for e in result.handoff_edges if e.from_agent == "a" and e.to_agent == "b"]
+    assert len(a_to_b) == 1
+
+
+def test_mapping_persists_triage_and_handoff_edges(log_dir: Path):
+    spec = _make_spec({"id": "x", "handoff_targets": []})
+    build = _fake_build_factory()
+    pub = _fake_publisher({
+        "ad_hoc_test_system.triage": "tid",
+        "ad_hoc_test_system.x": "xid",
+    })
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec))
+
+    data = json.loads(result.mapping_path.read_text(encoding="utf-8"))
+    assert data["triage_dify_app_id"] == "tid"
+    assert data["specialists"]["x"] == "xid"
+    assert any(e["from_agent"] == "triage" and e["to_agent"] == "x"
+               for e in data["handoff_edges"])
+
+
+def test_triage_failure_does_not_lose_specialists(log_dir: Path):
+    spec = _make_spec({"id": "booking"})
+    build = _fake_build_factory()
+    pub = _fake_publisher(
+        {},
+        errors={"ad_hoc_test_system.triage": "triage publish failed"},
+    )
+
+    projector = MultiAgentDifyProjector(pub, build, log_dir=log_dir)
+    result = asyncio.run(projector.project(spec))
+
+    assert result.success_count == 1  # booking ok
+    assert result.triage is not None
+    assert result.triage.error  # triage error captured
+    assert result.triage_projected is False
