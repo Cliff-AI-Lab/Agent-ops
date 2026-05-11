@@ -629,6 +629,21 @@ def main(argv: list[str] | None = None) -> int:
     g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
     p_verify.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_sysdiff = sub.add_parser(
+        "system-diff",
+        help="V2.9.2 Phase 10 W4 D3 多智能体系统级 reverse-compile: 比对每个 specialist 的 Dify export vs spec.tools baseline",
+    )
+    p_sysdiff.add_argument("--system-slug", required=True,
+                           help="多智能体 slug")
+    p_sysdiff.add_argument("--nl", required=True,
+                           help="生成原 spec 用的 NL (走 build-auto 重建)")
+    p_sysdiff.add_argument("--dify-base", default=None, help="Dify base URL")
+    p_sysdiff.add_argument("--budget-cny", type=float, default=None)
+    p_sysdiff.add_argument("--tenant", default="default")
+    p_sysdiff.add_argument("--no-tiktoken", action="store_true")
+    p_sysdiff.add_argument("--no-soft-warn", action="store_true")
+    p_sysdiff.add_argument("--json", action="store_true")
+
     p_keys = sub.add_parser(
         "deploy-keys",
         help="V2.9.1 Phase 10 W4 D1 为多智能体系统的每个 Dify app provisioning service API key",
@@ -1027,6 +1042,67 @@ def main(argv: list[str] | None = None) -> int:
                     mark = "ok" if c.passed else "FAIL"
                     print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
         return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
+
+    if args.cmd == "system-diff":
+        from dataclasses import asdict
+        from app.core.trace.bus import emit
+        from app.delivery.dify_publisher import DifyPublisher
+        from app.delivery.multi_agent_reverse_compiler import MultiAgentReverseCompiler
+
+        try:
+            res = asyncio.run(_run_build_auto(
+                args.nl, None, args.budget_cny,
+                tenant_id=args.tenant,
+                use_tiktoken=not args.no_tiktoken,
+                soft_warn=not args.no_soft_warn,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[factory] build-auto failed: {exc}", file=sys.stderr)
+            return 4
+        if res.get("path") != "multi":
+            print("[factory] NL routed to single-agent; system-diff requires multi.",
+                  file=sys.stderr)
+            return 1
+        spec = res["spec"]
+
+        log_dir = _default_harness_db_path().parent / ".factory_deploy_log"
+        mapping_path = log_dir / f"{args.system_slug}.multi-agent.json"
+        if not mapping_path.exists():
+            print(f"[factory] mapping not found: {mapping_path}", file=sys.stderr)
+            print("  run `harness factory pipeline --mode multi --canvas dify` first",
+                  file=sys.stderr)
+            return 1
+
+        publisher = DifyPublisher(base_url=args.dify_base)
+        differ = MultiAgentReverseCompiler(publisher)
+        try:
+            diff = differ.diff_system(spec, args.system_slug, mapping_path)
+        except RuntimeError as exc:
+            print(f"[factory] system-diff failed: {exc}", file=sys.stderr)
+            return 4
+
+        emit("L3", "MultiAgent", "system_reverse_compiled",
+             f"specimen={args.system_slug} tuned={len(diff.tuned_agents)} "
+             f"fetch_failed={len(diff.fetch_failures)}")
+
+        if args.json:
+            print(json.dumps({
+                "system_slug": diff.system_slug,
+                "system_human_tuned": diff.system_human_tuned,
+                "tuned_agents": diff.tuned_agents,
+                "fetch_failures": diff.fetch_failures,
+                "per_agent": [asdict(d) for d in diff.per_agent],
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"[system-diff] {diff.short_summary()}")
+            for d in diff.per_agent:
+                if d.fetch_error:
+                    print(f"  [SKIP] {d.agent_id:20s} {d.fetch_error}")
+                elif d.human_tuned:
+                    print(f"  [TUNED] {d.agent_id:20s} {d.short_summary()}")
+                else:
+                    print(f"  [OK   ] {d.agent_id:20s} no change")
+        return 3 if diff.system_human_tuned else 0
 
     if args.cmd == "deploy-keys":
         from dataclasses import asdict
