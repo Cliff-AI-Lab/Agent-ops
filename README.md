@@ -2,7 +2,7 @@
 
 **A deterministic, auditable factory pipeline that takes a sentence of natural language and produces a deployable Dify workflow — with a self-reinforcing reuse loop on its parts library.**
 
-> Status: **V2.9.0** (Phase 10 W3 GA · multi-agent Dify canvas projection with handoff webhooks) on branch `feat/v2.0.0-factory`
+> Status: **V2.9.1** (Phase 10 W4 D1 · Dify Service API key provisioning) on branch `feat/v2.0.0-factory`
 > Tracker: [`Agent ops V2.0.0` Obsidian workboard](#) · GitHub: [Cliff-AI-Lab/Agent-ops](https://github.com/Cliff-AI-Lab/Agent-ops)
 
 ---
@@ -72,6 +72,7 @@ Open the Agent Ops workspace UI at `http://127.0.0.1:8000` (after `uv run uvicor
 | **`pipeline --mode auto\|single\|multi`** | **Phase 10 W2 D2** | **Add agent-form routing: multi-agent path through build-auto with blast-radius summary** |
 | **`agent-deps --nl "..." --changed <id>`** | **Phase 10 W2 D1** | **Multi-agent blast-radius analysis (handoff chain / shared tools / transitive reach)** |
 | **`pipeline --mode multi --canvas dify [--inject-handoffs]`** | **Phase 10 W3 GA** | **Project each specialist + triage to its own Dify app, optionally inject handoff webhook nodes** |
+| **`deploy-keys --system-slug <slug>`** | **Phase 10 W4 D1** | **Provision Dify Service API keys for the projected multi-agent system; writes .env.dify-apps** |
 
 Bold rows are the lights-out additions (Phase 8 / 9 / 10).
 
