@@ -629,6 +629,15 @@ def main(argv: list[str] | None = None) -> int:
     g_v.add_argument("--all", action="store_true", help="对全部 atom 跑")
     p_verify.add_argument("--json", action="store_true", help="机器可读输出")
 
+    p_keys = sub.add_parser(
+        "deploy-keys",
+        help="V2.9.1 Phase 10 W4 D1 为多智能体系统的每个 Dify app provisioning service API key",
+    )
+    p_keys.add_argument("--system-slug", required=True,
+                        help="多智能体系统 slug (e.g. ad_hoc_test_system)")
+    p_keys.add_argument("--dify-base", default=None, help="Dify base URL")
+    p_keys.add_argument("--json", action="store_true")
+
     p_adeps = sub.add_parser(
         "agent-deps",
         help="V2.8.1 Phase 10 W2 多智能体级联影响分析:改一个 specialist 看影响哪些其他",
@@ -1018,6 +1027,70 @@ def main(argv: list[str] | None = None) -> int:
                     mark = "ok" if c.passed else "FAIL"
                     print(f"           [{mark:4s}] w={c.weight:.2f} {c.name}: {c.detail}")
         return 0 if all(r.pass_rate >= 0.7 for r in reports) else 3
+
+    if args.cmd == "deploy-keys":
+        from dataclasses import asdict
+        from app.delivery.dify_key_provisioner import DifyKeyProvisioner
+        from app.delivery.dify_publisher import DifyPublisher
+
+        # locate mapping JSON written by MultiAgentDifyProjector
+        log_dir = _default_harness_db_path().parent / ".factory_deploy_log"
+        mapping_path = log_dir / f"{args.system_slug}.multi-agent.json"
+        if not mapping_path.exists():
+            print(f"[factory] mapping not found: {mapping_path}", file=sys.stderr)
+            print("  run `harness factory pipeline --mode multi --canvas dify` first",
+                  file=sys.stderr)
+            return 1
+
+        try:
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"[factory] mapping unreadable: {exc}", file=sys.stderr)
+            return 1
+
+        agent_to_app: dict[str, str] = {}
+        triage_id = mapping.get("triage_dify_app_id")
+        if triage_id:
+            agent_to_app["triage"] = triage_id
+        for sid, aid in (mapping.get("specialists") or {}).items():
+            if aid:
+                agent_to_app[sid] = aid
+        if not agent_to_app:
+            print(f"[factory] no apps to provision in {mapping_path}", file=sys.stderr)
+            return 1
+
+        publisher = DifyPublisher(base_url=args.dify_base)
+        provisioner = DifyKeyProvisioner(publisher, log_dir=log_dir)
+        try:
+            res = provisioner.provision(args.system_slug, agent_to_app)
+        except RuntimeError as exc:
+            print(f"[factory] provision failed: {exc}", file=sys.stderr)
+            return 4
+
+        if args.json:
+            print(json.dumps({
+                "system_slug": res.system_slug,
+                "success": res.success_count,
+                "fail": res.fail_count,
+                "env_file": str(res.env_file_path) if res.env_file_path else None,
+                "keys_log": str(res.keys_log_path) if res.keys_log_path else None,
+                "keys": [{"agent_id": k.agent_id, "dify_app_id": k.dify_app_id,
+                          "reused": k.reused, "error": k.error,
+                          "token_present": bool(k.token)}
+                         for k in res.keys],
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"[deploy-keys] {res.short_summary()}")
+            for k in res.keys:
+                if k.ok:
+                    tag = "REUSED" if k.reused else "NEW"
+                    print(f"  [OK   {tag:6s}] {k.agent_id:24s} app={k.dify_app_id[:8]}..")
+                else:
+                    print(f"  [FAIL        ] {k.agent_id:24s} {k.error}")
+            print(f"  env file: {res.env_file_path}")
+            print(f"  keys log: {res.keys_log_path}")
+            print("  (tokens are gitignored; source the env file before runtime starts)")
+        return 0 if res.fail_count == 0 else 4
 
     if args.cmd == "agent-deps":
         from dataclasses import asdict

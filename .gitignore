@@ -39,6 +39,12 @@ harness.db
 assets/
 agents/__generated__/
 
+# Phase 8/9/10 operational state (per-system, never committed)
+.factory_deploy_log/
+**/.factory_deploy_log/
+*.api-keys.json
+*.env.dify-apps
+
 # Build artifacts
 build/
 dist/
