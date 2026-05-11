@@ -94,7 +94,12 @@ def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
         publisher = DifyPublisher(base_url=args.dify_base)
         projector = MultiAgentDifyProjector(publisher, _run_build)
         try:
-            proj_result = asyncio.run(projector.project(spec, system_slug=sys_slug))
+            proj_result = asyncio.run(projector.project(
+                spec,
+                system_slug=sys_slug,
+                inject_handoffs=args.inject_handoffs,
+                dify_base_url=args.dify_base,
+            ))
         except Exception as exc:  # noqa: BLE001
             print(f"[pipeline] canvas projection failed: {exc}", file=sys.stderr)
             proj_result = None
@@ -124,6 +129,19 @@ def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
                     print(f"    {e.from_agent} → {e.to_agent}  ({from_id[:8]}..→{to_id[:8]}..)")
                 if len(proj_result.handoff_edges) > 10:
                     print(f"    ... +{len(proj_result.handoff_edges) - 10} more")
+            if proj_result.injected_agents:
+                inj_ok = sum(1 for a in proj_result.injected_agents
+                             if not a.republish_error and a.injected_targets)
+                emit("L3", "MultiAgent", "handoff_webhooks_injected",
+                     f"specimen={args.specimen_id} system={sys_slug} "
+                     f"sources={len(proj_result.injected_agents)} ok={inj_ok}")
+                print(f"  handoff webhooks injected for {inj_ok}/{len(proj_result.injected_agents)} sources:")
+                for inj in proj_result.injected_agents:
+                    if inj.injected_targets and not inj.republish_error:
+                        tgts = ", ".join(inj.injected_targets)
+                        print(f"    [OK  ] {inj.source_agent:24s} → [{tgts}]")
+                    else:
+                        print(f"    [FAIL] {inj.source_agent:24s} {inj.republish_error}")
             if proj_result.mapping_path:
                 print(f"  mapping: {proj_result.mapping_path}")
     elif args.canvas != "none":
@@ -660,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="跳过 wiki 前置查询")
     p_pipe.add_argument("--auto-continue", action="store_true",
                         help="canvas hold 时自动续(CI 模式)")
+    p_pipe.add_argument("--inject-handoffs", action="store_true",
+                        help="多智能体 --canvas dify 时 W3 D4 注入 handoff webhook 节点并 republish")
     p_pipe.add_argument("--name", default=None, help="Dify app name override")
     p_pipe.add_argument("--json", action="store_true", help="机器可读输出")
 

@@ -94,6 +94,16 @@ class HandoffEdgeMetadata:
 
 
 @dataclass
+class InjectedAgent:
+    """Per-source-agent injection outcome (W3 D4)."""
+
+    source_agent: str
+    injected_targets: list[str] = field(default_factory=list)
+    republish_status: str = ""
+    republish_error: str = ""
+
+
+@dataclass
 class ProjectionResult:
     """Aggregate outcome of projecting one multi-agent spec."""
 
@@ -102,6 +112,7 @@ class ProjectionResult:
     triage: TriageProjection | None = None
     specialists: list[SpecialistProjection] = field(default_factory=list)
     handoff_edges: list[HandoffEdgeMetadata] = field(default_factory=list)
+    injected_agents: list[InjectedAgent] = field(default_factory=list)
     mapping_path: Path | None = None
 
     @property
@@ -185,6 +196,8 @@ class MultiAgentDifyProjector:
         system_slug: str | None = None,
         *,
         project_triage: bool = True,
+        inject_handoffs: bool = False,
+        dify_base_url: str | None = None,
     ) -> ProjectionResult:
         slug = system_slug or self._slugify(spec.name)
         existing = self._read_mapping(slug)
@@ -242,6 +255,17 @@ class MultiAgentDifyProjector:
             spec, triage_app_id, new_mapping,
         )
 
+        # ----- handoff webhook injection (W3 D4) -----
+        if inject_handoffs and result.handoff_edges:
+            result.injected_agents = await self._inject_and_republish(
+                slug=slug,
+                spec=spec,
+                triage_app_id=triage_app_id,
+                specialist_app_ids=new_mapping,
+                handoff_edges=result.handoff_edges,
+                dify_base_url=dify_base_url,
+            )
+
         mapping = _MappingFile(
             system_slug=slug,
             updated_at=result.projected_at,
@@ -251,6 +275,105 @@ class MultiAgentDifyProjector:
         )
         result.mapping_path = self._write_mapping(mapping)
         return result
+
+    async def _inject_and_republish(
+        self,
+        *,
+        slug: str,
+        spec: "MultiAgentSpec",
+        triage_app_id: str | None,
+        specialist_app_ids: dict[str, str],
+        handoff_edges: list[HandoffEdgeMetadata],
+        dify_base_url: str | None,
+    ) -> list[InjectedAgent]:
+        """For each source agent with outgoing edges, rebuild + inject + republish.
+
+        Splits the handoff_edges list by from_agent. For each source agent
+        we re-run FactoryPipeline on the agent's nl_brief (or triage NL),
+        inject the webhook chain, and DifyPublisher.publish under the same
+        specimen_id (so the existing dify_app_id is reused, not duplicated).
+        """
+        from app.delivery.handoff_webhook_injector import HandoffWebhookInjector
+
+        injector = HandoffWebhookInjector(dify_base_url=dify_base_url)
+
+        # group edges by source agent
+        by_source: dict[str, list[HandoffEdgeMetadata]] = {}
+        for e in handoff_edges:
+            by_source.setdefault(e.from_agent, []).append(e)
+
+        out: list[InjectedAgent] = []
+        for source_agent, edges in by_source.items():
+            if source_agent == "triage":
+                source_app_id = triage_app_id
+                source_specimen = f"{slug}.triage"
+                source_nl = self._build_triage_nl(spec)
+                source_name = spec.triage.name
+            else:
+                source_app_id = specialist_app_ids.get(source_agent)
+                source_specimen = f"{slug}.{source_agent}"
+                sp = next((s for s in spec.specialists if s.id == source_agent), None)
+                if sp is None:
+                    out.append(InjectedAgent(
+                        source_agent=source_agent,
+                        republish_error="unknown source agent (not in spec)",
+                    ))
+                    continue
+                source_nl = sp.nl_brief
+                source_name = sp.name
+
+            if not source_app_id:
+                out.append(InjectedAgent(
+                    source_agent=source_agent,
+                    republish_error="source not yet published (skipping injection)",
+                ))
+                continue
+
+            # rebuild the YAML so we have something fresh to inject into
+            try:
+                build_result = await self._build(source_nl)
+            except Exception as exc:  # noqa: BLE001
+                out.append(InjectedAgent(
+                    source_agent=source_agent,
+                    republish_error=f"rebuild failed: {exc}",
+                ))
+                continue
+            outputs = build_result.get("outputs", {})
+            yaml_text = outputs.get("dify") or build_result.get("dsl") or ""
+            if not yaml_text:
+                out.append(InjectedAgent(
+                    source_agent=source_agent,
+                    republish_error="rebuild produced no YAML",
+                ))
+                continue
+
+            inj_res = injector.inject(source_agent, yaml_text, edges)
+            if not inj_res.did_inject:
+                out.append(InjectedAgent(
+                    source_agent=source_agent,
+                    republish_error=f"injector skipped: {inj_res.skipped_reason}",
+                ))
+                continue
+
+            try:
+                pub_res = self.publisher.publish(
+                    source_specimen, inj_res.yaml_out, app_name=source_name,
+                )
+            except RuntimeError as exc:  # noqa: BLE001
+                out.append(InjectedAgent(
+                    source_agent=source_agent,
+                    injected_targets=[w.target_agent for w in inj_res.injected],
+                    republish_error=f"republish failed: {exc}",
+                ))
+                continue
+
+            out.append(InjectedAgent(
+                source_agent=source_agent,
+                injected_targets=[w.target_agent for w in inj_res.injected],
+                republish_status=pub_res.status,
+                republish_error=pub_res.error,
+            ))
+        return out
 
     def _build_triage_nl(self, spec: "MultiAgentSpec") -> str:
         """Synthesize an NL brief for the triage agent.
