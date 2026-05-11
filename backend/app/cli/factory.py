@@ -84,9 +84,37 @@ def _pipeline_multi_tail(args, multi_res: dict[str, Any]) -> int:
          f"kinds={','.join(triage_report.impact_kinds)}")
     print(f"[pipeline] blast radius from triage: {triage_report.short_summary()}")
 
-    if args.canvas != "none":
-        print("[pipeline] NOTE: --canvas only meaningful in single-agent mode for W2;")
-        print("  multi-agent canvas projection lands in Phase 10 W3.")
+    if args.canvas == "dify":
+        # Phase 10 W3 D1: project each specialist to its own Dify app.
+        # Other canvases (Stitch / React Flow / Excalidraw) plug in here
+        # as sibling Projector classes following the same shape.
+        from app.delivery.dify_publisher import DifyPublisher
+        from app.delivery.multi_agent_dify_projector import MultiAgentDifyProjector
+
+        publisher = DifyPublisher(base_url=args.dify_base)
+        projector = MultiAgentDifyProjector(publisher, _run_build)
+        try:
+            proj_result = asyncio.run(projector.project(spec, system_slug=sys_slug))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[pipeline] canvas projection failed: {exc}", file=sys.stderr)
+            proj_result = None
+
+        if proj_result is not None:
+            emit("L3", "MultiAgent", "canvas_projected",
+                 f"specimen={args.specimen_id} system={sys_slug} "
+                 f"ok={proj_result.success_count} fail={proj_result.fail_count}")
+            print(f"[pipeline] canvas=dify projection: {proj_result.short_summary()}")
+            for sp in proj_result.specialists:
+                tag = "OK" if not sp.error else "FAIL"
+                print(f"    [{tag:4s}] {sp.specialist_id:24s} → {sp.dify_app_id or '-'}")
+                if sp.error:
+                    print(f"           {sp.error}")
+            if proj_result.mapping_path:
+                print(f"  mapping: {proj_result.mapping_path}")
+    elif args.canvas != "none":
+        print(f"[pipeline] NOTE: --canvas {args.canvas} not yet supported in multi mode;")
+        print("  Dify projection ships in W3 D1. Other canvases (Stitch / React Flow / Excalidraw)")
+        print("  plug in via the projector protocol later in W3.")
 
     emit("L3", "Pipeline", "final_deployed",
          f"specimen={args.specimen_id} mode=multi system={sys_slug} "
